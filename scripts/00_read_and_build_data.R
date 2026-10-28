@@ -213,7 +213,7 @@ cat("eDNA reef summary:", nrow(edna_reef_raw), "reefs. eDNA raw samples:", nrow(
 # One row per survey; ReefLabel matches manta's reef_label directly.
 {
 rhis_raw <- read_excel(
-  "data/raw/manta_tows/260529-COTS-Manta-Cull-RHIS-Lawrence-CSIRO (1).xlsx",
+  "data/raw/manta_tows/260529-COTS-Manta-Cull-RHIS.xlsx",
   sheet = "RHIS"
 )
 

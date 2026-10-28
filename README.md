@@ -51,8 +51,9 @@ source("scripts/jobs/plot_reef_spatial_overview.R")    # reef map and example re
 source("scripts/jobs/build_shiny_app_data.R")          # Shiny data bundle
 ```
 
-**Inputs under `data/raw/`:** `manta_tows/` (`manta_tows.parquet`, per-voyage
-`*.kml` tracks, the RHIS workbook, sheet `RHIS`); `reefscan_surface_coral/reefscan_tows.parquet`;
+**Inputs under `data/raw/`:** `manta_tows/` (`manta_tows.parquet`,
+`260529-COTS-Manta-Cull-RHIS.xlsx` read from sheet `RHIS`, and the voyage
+`*.kml` tracks used only for the example-reef map); `reefscan_surface_coral/reefscan_tows.parquet`;
 `reefscan_deep/` (ReefScan Deep point-classification CSV); `reefscan_cots/csv_files/*.csv`
 (COTSpotter exports); `eDNA/eDNA_BR_02.csv` and `eDNA/RJFMP25_26 Results.csv`;
 `COTS Control Program Cull Sites - External/Cull_Sites_Master.shp`.
@@ -89,7 +90,9 @@ Re-create the bundle with `scripts/jobs/build_shiny_app_data.R`.
 ## Data
 
 The raw data and fitted posteriors are not stored in this repository
-(`data/` and `output/` are git-ignored placeholders).
+(`data/` and `output/` are git-ignored placeholders). The input data are
+published as a zip file whose contents unpack to `data/raw/`: unzip it into the
+repository root and the pipeline above runs as written.
 
 **Data location: TBD.** *(To be added once the data are archived.)*
 
