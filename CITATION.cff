@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite it using the metadata in this file."
+title: "CCIP-BR-04: calibrating RJFMP coral cover and Crown-of-Thorns Starfish monitoring methods"
+type: software
+authors:
+  - family-names: Gladish
+    given-names: Dan
+    email: dan.gladish@csiro.au
+    affiliation: "CSIRO"
+abstract: >-
+  Analysis code for CCIP-BR-04. Bayesian mixed models calibrate coral cover and
+  Crown-of-Thorns Starfish (COTS) measurements from manta tow, ReefScan Surface,
+  ReefScan Deep and eDNA against one another at manta-tow, cull-site and reef
+  scale, with uncertainty, using data from Reef Joint Field Management Program
+  (RJFMP) voyages in 2025-26. RHIS is summarised descriptively. Includes an
+  interactive calibration-curve explorer (Shiny).
+keywords:
+  - Great Barrier Reef
+  - Crown-of-Thorns Starfish
+  - coral cover
+  - monitoring calibration
+  - Bayesian mixed models
+license: GPL-2.0-or-later
+repository-code: "https://github.com/dangladish/ccip-br-04"
+url: "https://github.com/dangladish/ccip-br-04"

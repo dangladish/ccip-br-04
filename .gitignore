@@ -1,0 +1,26 @@
+# R / RStudio
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj.user
+
+# Data and model outputs (large and/or not redistributable; see README.md)
+data/raw/*
+data/derived/*
+output/posteriors/*
+output/figures/*
+!data/raw/.gitkeep
+!data/derived/.gitkeep
+!output/posteriors/.gitkeep
+!output/figures/.gitkeep
+
+# Backups
+*.rds.bak
+
+# Deployment credentials/metadata
+rsconnect/
+
+# OS
+.DS_Store
+Thumbs.db
