@@ -393,8 +393,8 @@ make_necklace_reef <- function(reef_lbl, target_area_m2 = 100000, zoom = 15) {
     summarise(
       n_tows              = n(),
       manta_cots_rate     = sum(cots_observed, na.rm = TRUE) / n_tows,
-      scar_rate           = mean(scar_present, na.rm = TRUE),
-      manta_combined_rate = manta_cots_rate + scar_rate,
+      scars_per_tow       = mean(scar_count, na.rm = TRUE),
+      manta_combined_rate = manta_cots_rate + scars_per_tow,
       n_tows_with_surf    = sum(!is.na(cots_reefscan_surface)),
       rs_surf_rate        = if_else(n_tows_with_surf > 0,
                                     sum(cots_reefscan_surface, na.rm = TRUE) / n_tows_with_surf,
