@@ -55,7 +55,7 @@ mt_target <- mt |> filter(reef_label == TARGET_REEF, !is.na(start_lat), !is.na(e
 ## No saved checkpoint at point grain, so re-read and re-apply the voyage exclusion
 ## (tow_id -> voyage join; survey-date window where tow_id has no match).
 ## mt_allvoyages is kept for the GBR-wide map below.
-mt_allvoyages <- arrow::read_parquet("data/raw/manta_tows/manta_tows.parquet") |>
+mt_allvoyages <- arrow::read_parquet("data/derived/ingest/manta_tows.parquet") |>
   mutate(tow_distance_m = as.numeric(tow_distance_m)) |>
   filter(!is.na(tow_distance_m), tow_distance_m > 0)
 voyage_windows <- mt_allvoyages |> summarise(start = min(tow_date), end = max(tow_date), .by = voyage)
@@ -67,7 +67,7 @@ in_excluded_window <- function(d) {
   }))
 }
 
-rs_surface_raw <- arrow::read_parquet("data/raw/reefscan_surface_coral/reefscan_tows.parquet") |>
+rs_surface_raw <- arrow::read_parquet("data/derived/ingest/reefscan_surface_tows.parquet") |>
   select(tow_id, site_reef_name, image_latitude, image_longitude, survey_date)
 
 rs_surf_voyage  <- rs_surface_raw |> left_join(mt_allvoyages |> distinct(tow_id, voyage), by = "tow_id") |> pull(voyage)

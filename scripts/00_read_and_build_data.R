@@ -5,9 +5,9 @@
 ##   tow_level        one row per manta tow segment
 ##   cull_site_level  one row per cull site
 ##   reef_level       one row per reef
-## Sources: manta tows, ReefScan Surface/Deep points, eDNA, RHIS, cull-site
-## polygons, and COTSpotter counts (from 00a_build_cotspotter_detections.R,
-## which must be run first). Analytic standard errors are attached.
+## Sources: manta tows (EotR workbooks + KML tracks), ReefScan Surface/Deep points,
+## eDNA, RHIS, cull-site polygons, and COTSpotter counts (built by
+## 00a_build_cotspotter_detections.R, sourced below). Analytic standard errors are attached.
 ##
 ## Voyage exclusion: three FMPCRS voyages are dropped from the manta tows,
 ## ReefScan points and COTSpotter counts (set in `exclude_voyages` below):
@@ -21,6 +21,8 @@ library(tidyverse)
 library(sf)
 library(arrow)
 library(readxl)
+library(lubridate)
+library(xml2)
 
 dir.create("data/derived", showWarnings = FALSE, recursive = TRUE)
 
@@ -65,9 +67,434 @@ pois_sum_se  <- function(count) ifelse(is.na(count), NA_real_, sqrt(count))
 pois_rate_se <- function(count, n) ifelse(is.na(count) | is.na(n) | n == 0, NA_real_, sqrt(count) / n)
 }
 
+# ---- Ingest: original exports -> manta tows + ReefScan Surface points matched to tows ----
+# Ported from the ingest scripts in github.com/open-AIMS/digital-manta-tow (same author).
+# Inputs (data/raw/): manta_tows/QPWS_FMPCRS_*/ EotR report workbooks and HardCoral KML tracks
+# (Whitsundays 2024-05: old-format tender KMLs); reefscan_surface_coral/*.csv[.gz], the ReefCloud
+# point-classification export (only the columns read below are needed).
+# Outputs (data/derived/ingest/): manta_tows.parquet (one row per tow, all voyages) and
+# reefscan_surface_tows.parquet (one row per point, with matched tow_id).
+# Image -> tow, dist_cutoff_m = 25: (1) candidate tows = same reef code; (2) tow whose UTC window
+# (AEST start - 10 h, + distance/speed) contains the image time, nearest KML track if several;
+# (3) a temporal match > 25 m from its track goes to the nearest same-reef tow, else dropped;
+# (4) no temporal match: nearest same-reef tow within 25 m, else dropped.
+# Cached; rebuilt if an output is missing or options(br04.rebuild_ingest = TRUE).
+ingest_dir     <- "data/derived/ingest"
+ingest_manta   <- file.path(ingest_dir, "manta_tows.parquet")
+ingest_rss     <- file.path(ingest_dir, "reefscan_surface_tows.parquet")
+rebuild_ingest <- isTRUE(getOption("br04.rebuild_ingest", FALSE)) || !all(file.exists(c(ingest_manta, ingest_rss)))
+dir.create(ingest_dir, showWarnings = FALSE, recursive = TRUE)
+
+if (rebuild_ingest) local({
+  manta_dir     <- "data/raw/manta_tows"
+  reefscan_dir  <- "data/raw/reefscan_surface_coral"
+  dist_cutoff_m <- 25
+
+  ## ---- A. manta tows: EotR xlsx exports -> one row per tow ----
+  all_xlsx <- list.files(manta_dir, pattern = "Eotr_CotsSurveillanceReport.*\\.xlsx$", recursive = TRUE, full.names = TRUE)
+  # tow-level files have no surveyor breakdown; observer-level files add Surveyor id/level
+  tow_files <- Filter(\(x) !grepl("Obs.lev", x, ignore.case = TRUE), all_xlsx)
+  obs_files <- Filter(\(x)  grepl("Obs.lev", x, ignore.case = TRUE), all_xlsx)
+  stopifnot(length(tow_files) > 0)
+  message("INGEST: reading ", length(tow_files), " tow-level and ", length(obs_files), " observer-level EotR workbooks")
+
+  # all columns read as text (types differ across file versions); the id column's capitalisation varies
+  manta_raw <- lapply(tow_files, \(f) {
+    read_excel(f, col_types = "text") |>
+      rename_with(\(nm) sub("(?i)cots surveillance id", "COTS Surveillance id", nm, perl = TRUE)) |>
+      mutate(survey_folder = basename(dirname(f)), source_file = basename(f))
+  }) |>
+    bind_rows() |>
+    filter(!is.na(`Tow time`))
+
+  # `Tow time` is a "dd/mm/yyyy HH:MM AM/PM" string or an Excel serial number. The values are AEST
+  # but labelled UTC here (kept: the matcher subtracts 10 h to get true UTC).
+  manta_tows <- manta_raw |>
+    mutate(
+      tow_id = trimws(`COTS Surveillance id`),
+      tow_datetime = case_when(
+        grepl("^[0-9.]+$", `Tow time`) ~ as.POSIXct(as.numeric(`Tow time`) * 86400, origin = "1899-12-30", tz = "UTC"),
+        TRUE ~ suppressWarnings(parse_date_time(`Tow time`, orders = c("dmy I:M p", "dmy HM"), tz = "UTC"))
+      ),
+      tow_date = as_date(tow_datetime),
+      across(c(`Start lat`, `Start long`, `End lat`, `End long`, `Distance (m)`, `Average speed (km/h)`), as.numeric)
+    ) |>
+    rename(
+      voyage = Voyage, vessel = Vessel,
+      start_lat = `Start lat`, start_lon = `Start long`, end_lat = `End lat`, end_lon = `End long`,
+      tow_distance_m = `Distance (m)`, avg_speed_kmh = `Average speed (km/h)`
+    ) |>
+    select(
+      tow_id, tow_date, tow_datetime, voyage, vessel, survey_folder, source_file,
+      start_lat, start_lon, end_lat, end_lon, tow_distance_m, avg_speed_kmh,
+      everything(), -`COTS Surveillance id`, -`Tow time`
+    )
+
+  surveyor_info <- lapply(obs_files, \(f) {
+    read_excel(f, col_types = "text") |>
+      rename_with(\(nm) sub("(?i)cots surveillance id", "tow_id", nm, perl = TRUE)) |>
+      filter(!is.na(`Tow time`)) |>
+      mutate(tow_id = trimws(tow_id)) |>
+      select(tow_id, surveyor_id = `Surveyor id`, surveyor_level = `Surveyor level`)
+  }) |>
+    bind_rows() |>
+    distinct(tow_id, .keep_all = TRUE)
+  manta_tows <- manta_tows |> left_join(surveyor_info, by = "tow_id")
+
+  stopifnot(!anyNA(manta_tows$tow_id), !anyNA(manta_tows$tow_date))
+  # Written and re-read before the matching: parquet
+  # stores times at microsecond precision, and the image-in-tow-window test is sensitive to that
+  # at window edges (17 of ~161,000 images switch temporal/spatial label otherwise).
+  arrow::write_parquet(manta_tows, ingest_manta)
+  manta_tows <- arrow::read_parquet(ingest_manta)
+  message("INGEST: ", nrow(manta_tows), " tows; ", sum(manta_tows$tow_id %in% surveyor_info$tow_id), " with surveyor info")
+
+  ## ---- B. KML track of each tow ----
+  # New format (every voyage but Whitsundays 2024-05): tow id in the <name> tag of the
+  # Eotr_CotsSurveillance_HardCoral* KML. Whitsundays 2024-05 (old format): two tender KMLs
+  # whose placemarks carry only a "Survey time", matched to tows by time window.
+  old_format_folders <- "QPWS_FMPCRS_2024-05_Whitsundays_20241015"
+
+  kml_tow_ids <- function(kml_path) {
+    kml <- read_xml(kml_path); ns <- xml_ns(kml)
+    pms <- xml_find_all(kml, ".//d1:Placemark[.//d1:LineString]", ns)
+    ids <- xml_text(xml_find_first(pms, "d1:name", ns))
+    trimws(ids[grepl("^[0-9]+$", trimws(ids))])
+  }
+  kml_datetimes <- function(kml_path) {
+    kml <- read_xml(kml_path); ns <- xml_ns(kml)
+    pms <- xml_find_all(kml, ".//d1:Placemark[.//d1:LineString]", ns)
+    times <- xml_text(xml_find_first(pms, ".//d1:Data[@name='Survey time']/d1:value", ns))
+    suppressWarnings(parse_date_time(times, orders = c("dmy I:M p", "dmy HM")))
+  }
+  kml_centroids <- function(kml_path) {
+    kml <- read_xml(kml_path); ns <- xml_ns(kml)
+    pms <- xml_find_all(kml, ".//d1:Placemark[.//d1:LineString]", ns)
+    lapply(pms, \(pm) {
+      coord_txt <- xml_text(xml_find_first(pm, ".//d1:LineString/d1:coordinates", ns))
+      pts <- strsplit(strsplit(trimws(coord_txt), "\\s+")[[1]], ",")
+      c(cen_lon = mean(as.numeric(sapply(pts, `[`, 1)), na.rm = TRUE),
+        cen_lat = mean(as.numeric(sapply(pts, `[`, 2)), na.rm = TRUE))
+    }) |>
+      do.call(rbind, args = _) |>
+      as.data.frame()
+  }
+
+  tows <- manta_tows |>
+    mutate(
+      kml_format = if_else(survey_folder %in% old_format_folders, "old", "new"),
+      kml_path   = NA_character_,
+      kml_match  = NA_character_
+    )
+
+  for (folder in unique(tows$survey_folder[tows$kml_format == "new"])) {
+    kmls <- list.files(file.path(manta_dir, folder), pattern = "HardCoral.*\\.kml$",
+                       recursive = FALSE, full.names = TRUE, ignore.case = TRUE)
+    if (length(kmls) == 0) { warning("No HardCoral KML found for: ", folder); next }
+    missing_ids <- setdiff(tows$tow_id[tows$survey_folder == folder], kml_tow_ids(kmls[[1]]))
+    if (length(missing_ids) > 0) warning(length(missing_ids), " tow IDs not found in KML for ", folder)
+    kml_found <- kmls[[1]]
+    tows <- tows |>
+      mutate(
+        kml_path  = if_else(survey_folder == folder, kml_found, kml_path),
+        kml_match = if_else(survey_folder == folder, "tow_id",  kml_match)
+      )
+  }
+
+  # Whitsundays 2024-05: KML survey_time is AEST like tow_datetime. A placemark belongs to a tow if
+  # its time is inside [tow_datetime, tow_datetime + distance/speed]; if several do, the one whose
+  # centroid is nearest the tow start wins.
+  whits_folder <- old_format_folders
+  whits_dir    <- file.path(manta_dir, whits_folder, "EotR_App_Exports")
+  whits_kmls   <- list(
+    tender1 = list.files(file.path(whits_dir, "Tender 1"), pattern = "Hard_Coral.*\\.kml$", full.names = TRUE, ignore.case = TRUE)[[1]],
+    tender2 = list.files(file.path(whits_dir, "Tender 2"), pattern = "Hard_Coral.*\\.kml$", full.names = TRUE, ignore.case = TRUE)[[1]]
+  )
+  whits_rows       <- which(tows$survey_folder == whits_folder)
+  whits_tow_starts <- manta_tows$tow_datetime[whits_rows]
+  whits_speeds     <- manta_tows$avg_speed_kmh[whits_rows]
+  # speed <= 0 would give an infinite end time; NA skips those tows
+  whits_tow_ends <- whits_tow_starts +
+    ifelse(!is.na(whits_speeds) & whits_speeds > 0,
+           manta_tows$tow_distance_m[whits_rows] / (whits_speeds * 1000 / 3600), NA_real_)
+
+  t1_dts  <- kml_datetimes(whits_kmls$tender1);  t2_dts  <- kml_datetimes(whits_kmls$tender2)
+  t1_cens <- kml_centroids(whits_kmls$tender1);  t2_cens <- kml_centroids(whits_kmls$tender2)
+
+  for (i in seq_along(whits_rows)) {
+    row_i   <- whits_rows[i]
+    t_start <- whits_tow_starts[i]
+    t_end   <- whits_tow_ends[i]
+    if (is.na(t_start) || is.na(t_end)) next
+    t1_hit <- which(t1_dts >= t_start & t1_dts <= t_end)
+    t2_hit <- which(t2_dts >= t_start & t2_dts <= t_end)
+    n_hits <- length(t1_hit) + length(t2_hit)
+    if (n_hits == 0) next
+    if (n_hits == 1) {
+      tows$kml_path[row_i]  <- if (length(t1_hit) == 1) whits_kmls$tender1 else whits_kmls$tender2
+      tows$kml_match[row_i] <- "datetime"
+      next
+    }
+    candidates <- bind_rows(
+      if (length(t1_hit) > 0) data.frame(kml = whits_kmls$tender1, cen_lon = t1_cens$cen_lon[t1_hit], cen_lat = t1_cens$cen_lat[t1_hit]),
+      if (length(t2_hit) > 0) data.frame(kml = whits_kmls$tender2, cen_lon = t2_cens$cen_lon[t2_hit], cen_lat = t2_cens$cen_lat[t2_hit])
+    ) |>
+      mutate(dist = sqrt((cen_lon - tows$start_lon[row_i])^2 + (cen_lat - tows$start_lat[row_i])^2))
+    best <- candidates[which.min(candidates$dist), ]
+    tows$kml_path[row_i]  <- best$kml
+    tows$kml_match[row_i] <- "datetime_proximity"
+  }
+  message("INGEST: tows assigned a KML: ", sum(!is.na(tows$kml_path)), " / ", nrow(tows))
+
+  ## ---- C. ReefScan Surface points (ReefCloud export) ----
+  # Only the columns used downstream are read; the matcher is image-level.
+  rs_csv <- list.files(reefscan_dir, pattern = "\\.csv(\\.gz)?$", full.names = TRUE)
+  stopifnot("expected exactly one ReefScan Surface CSV" = length(rs_csv) == 1)
+  rs_cols <- c("image_id", "image_name", "site_reef_name", "site_code", "survey_start_date (UTC)",
+               "image_latitude", "image_longitude", "point_machine_group_code", "point_human_group_code")
+  message("INGEST: reading ", basename(rs_csv))
+  reefscan <- arrow::read_csv_arrow(
+    rs_csv, col_select = dplyr::all_of(rs_cols),
+    col_types = arrow::schema(image_id = arrow::float64(), image_latitude = arrow::float64(),
+                              image_longitude = arrow::float64(), `survey_start_date (UTC)` = arrow::string()),
+    parse_options = arrow::CsvParseOptions$create(newlines_in_values = TRUE)
+  )
+  # the export column is UTC ("YYYY-MM-DD HH:MM:SS+00:00"), so the date is its first 10 characters
+  stopifnot(all(grepl("\\+00:00$", reefscan$`survey_start_date (UTC)`[!is.na(reefscan$`survey_start_date (UTC)`)][1:1000])))
+  reefscan <- reefscan |>
+    mutate(survey_date = as.Date(substr(`survey_start_date (UTC)`, 1, 10)), `survey_start_date (UTC)` = NULL)
+  message("INGEST: ", nrow(reefscan), " ReefScan Surface points, ", n_distinct(reefscan$image_id), " images; ",
+          sum(is.na(reefscan$survey_date)), " with no survey date")
+
+  ## ---- D. match ReefScan images to manta tows ----
+  # site_codes with no ##-### reef code
+  reef_code_overrides <- c("Hardy Reef" = "19-135")
+  extract_reef_code <- function(site_code) {
+    overridden <- reef_code_overrides[site_code]
+    m          <- regexpr("\\d{2}-\\d{3,4}[A-Za-z]?", site_code)
+    extracted  <- ifelse(m != -1, tolower(substr(site_code, m, m + attr(m, "match.length") - 1)), NA_character_)
+    ifelse(!is.na(overridden), overridden, extracted)
+  }
+
+  parse_kml_new <- function(kml_path) {
+    kml <- read_xml(kml_path); ns <- xml_ns(kml)
+    pms <- xml_find_all(kml, ".//d1:Placemark[.//d1:LineString]", ns)
+    results <- lapply(pms, \(pm) {
+      tow_id <- xml_text(xml_find_first(pm, "d1:name", ns))
+      if (is.na(tow_id) || !grepl("^[0-9]+$", trimws(tow_id))) return(NULL)
+      coord_txt <- xml_text(xml_find_first(pm, ".//d1:LineString/d1:coordinates", ns))
+      pts <- strsplit(strsplit(trimws(coord_txt), "\\s+")[[1]], ",")
+      lon <- as.numeric(sapply(pts, `[`, 1)); lat <- as.numeric(sapply(pts, `[`, 2))
+      n <- length(lon)
+      if (n < 2) return(NULL)
+      data.frame(tow_id = trimws(tow_id), x1 = lon[-n], y1 = lat[-n], x2 = lon[-1], y2 = lat[-1])
+    })
+    bind_rows(results[!sapply(results, is.null)])
+  }
+  parse_kml_old <- function(kml_path) {
+    kml <- read_xml(kml_path); ns <- xml_ns(kml)
+    pms <- xml_find_all(kml, ".//d1:Placemark[.//d1:LineString]", ns)
+    results <- lapply(pms, \(pm) {
+      st <- xml_text(xml_find_first(pm, ".//d1:Data[@name='Survey time']/d1:value", ns))
+      coord_txt <- xml_text(xml_find_first(pm, ".//d1:LineString/d1:coordinates", ns))
+      pts <- strsplit(strsplit(trimws(coord_txt), "\\s+")[[1]], ",")
+      lon <- as.numeric(sapply(pts, `[`, 1)); lat <- as.numeric(sapply(pts, `[`, 2))
+      n <- length(lon)
+      if (n < 2 || is.na(st)) return(NULL)
+      data.frame(
+        # UTC label to match tow_datetime's storage convention (AEST values labelled UTC)
+        dt = suppressWarnings(parse_date_time(st, orders = c("dmy I:M p", "dmy HM"), tz = "UTC")),
+        x1 = lon[-n], y1 = lat[-n], x2 = lon[-1], y2 = lat[-1]
+      )
+    })
+    bind_rows(results[!sapply(results, is.null)])
+  }
+  # centroid-to-point distance (m): tiebreak when several KML tracks fall in one tow window
+  track_centroid_dist_m <- function(x1, y1, x2, y2, target_lon, target_lat) {
+    cx <- mean(c(x1, x2)); cy <- mean(c(y1, y2))
+    cos_lat <- cos(target_lat * pi / 180)
+    sqrt(((cx - target_lon) * 111320 * cos_lat)^2 + ((cy - target_lat) * 110540)^2)
+  }
+
+  tows_matched <- tows |> filter(!is.na(kml_path), !is.na(kml_match))
+
+  new_segs <- tows_matched |>
+    filter(kml_format == "new") |>
+    pull(kml_path) |>
+    unique() |>
+    lapply(\(p) parse_kml_new(p) |> filter(tow_id %in% tows_matched$tow_id)) |>
+    bind_rows()
+
+  old_tows <- tows_matched |>
+    filter(kml_format == "old", !is.na(avg_speed_kmh), avg_speed_kmh > 0) |>
+    mutate(
+      tow_duration_s = tow_distance_m / (avg_speed_kmh * 1000 / 3600),
+      tow_end_aest   = tow_datetime + tow_duration_s
+    ) |>
+    select(tow_id, tow_datetime, tow_end_aest, start_lat, start_lon, kml_path)
+
+  old_segs <- old_tows |>
+    pull(kml_path) |>
+    unique() |>
+    lapply(\(p) {
+      raw <- parse_kml_old(p)
+      if (is.null(raw) || nrow(raw) == 0) return(NULL)
+      tows_this <- old_tows |> filter(kml_path == p)
+      lapply(seq_len(nrow(tows_this)), \(i) {
+        t_start <- tows_this$tow_datetime[i]
+        t_end   <- tows_this$tow_end_aest[i]
+        if (is.na(t_start) || is.na(t_end)) return(NULL)
+        in_window <- which(raw$dt >= t_start & raw$dt <= t_end)
+        if (length(in_window) == 0) return(NULL)
+        unique_dts <- unique(raw$dt[in_window])
+        if (length(unique_dts) > 1) {
+          centroid_dists <- vapply(unique_dts, \(dt_) {
+            idx <- which(raw$dt == dt_)[1]
+            track_centroid_dist_m(raw$x1[idx], raw$y1[idx], raw$x2[idx], raw$y2[idx],
+                                  tows_this$start_lon[i], tows_this$start_lat[i])
+          }, numeric(1))
+          in_window <- which(raw$dt == unique_dts[which.min(centroid_dists)])
+        }
+        raw[in_window, ] |>
+          mutate(tow_id = tows_this$tow_id[i]) |>
+          select(tow_id, x1, y1, x2, y2)
+      }) |>
+        bind_rows()
+    }) |>
+    bind_rows()
+
+  kml_segments <- bind_rows(new_segs, old_segs) |> distinct(tow_id, x1, y1, x2, y2)
+  message(sprintf("INGEST: KML segments: %d across %d tows", nrow(kml_segments), n_distinct(kml_segments$tow_id)))
+
+  # Planar metre approximation at the mean latitude of all images (reef scale, tens of km)
+  m_per_deg_lat <- 111000
+  m_per_deg_lon <- 111000 * cos(mean(range(reefscan$image_latitude, na.rm = TRUE)) * pi / 180)
+
+  kml_seg_sc <- kml_segments |>
+    mutate(sx1 = x1 * m_per_deg_lon, sy1 = y1 * m_per_deg_lat, sx2 = x2 * m_per_deg_lon, sy2 = y2 * m_per_deg_lat) |>
+    group_by(tow_id) |>
+    mutate(
+      seg_len_m   = sqrt((sx2 - sx1)^2 + (sy2 - sy1)^2),
+      # distance along the tow from its start to the beginning of each segment
+      seg_start_m = cumsum(lag(seg_len_m, default = 0))
+    ) |>
+    ungroup()
+
+  # image time (UTC) is embedded in image_name as YYYYMMDD_HHMMSS
+  reefscan <- reefscan |>
+    mutate(
+      image_datetime_utc = as.POSIXct(
+        ifelse(grepl("\\d{8}_\\d{6}", image_name), sub(".*(\\d{8}_\\d{6}).*", "\\1", image_name), NA_character_),
+        format = "%Y%m%d_%H%M%S", tz = "UTC"
+      )
+    )
+
+  # tow_datetime is AEST (UTC+10) with a UTC label: subtract 10 h; end time from speed and distance
+  tow_windows <- tows |>
+    filter(!is.na(tow_datetime), !is.na(avg_speed_kmh), avg_speed_kmh > 0, !is.na(tow_distance_m)) |>
+    mutate(
+      tow_duration_s = tow_distance_m / (avg_speed_kmh * 1000 / 3600),
+      tow_start_utc  = tow_datetime - 10 * 3600,
+      tow_end_utc    = tow_start_utc + tow_duration_s,
+      reef_code      = tolower(`Reef label`)
+    ) |>
+    select(tow_id, reef_code, tow_start_utc, tow_end_utc)
+
+  # all points of an image share one GPS fix: match once per image, join back to the points
+  rs_images <- reefscan |>
+    distinct(image_id, .keep_all = TRUE) |>
+    filter(!is.na(image_latitude), !is.na(image_longitude)) |>
+    mutate(reef_code = extract_reef_code(site_code), rx = image_longitude * m_per_deg_lon, ry = image_latitude * m_per_deg_lat)
+  message(sprintf("INGEST: matching %d images (%d with a reef code)", nrow(rs_images), sum(!is.na(rs_images$reef_code))))
+
+  # per (image, candidate tow): minimum distance to any segment of the tow's KML track, and the
+  # along-track distance to the foot of that perpendicular
+  kml_min_dist <- function(img_tow_df) {
+    img_tow_df |>
+      left_join(kml_seg_sc, by = "tow_id", relationship = "many-to-many") |>
+      mutate(
+        dx = sx2 - sx1, dy = sy2 - sy1, len_sq = dx^2 + dy^2,
+        t = ifelse(len_sq == 0, 0, pmax(0, pmin(1, ((rx - sx1) * dx + (ry - sy1) * dy) / len_sq))),
+        dist_m = sqrt((rx - (sx1 + t * dx))^2 + (ry - (sy1 + t * dy))^2),
+        cumul_at_foot = seg_start_m + t * seg_len_m
+      ) |>
+      group_by(image_id, tow_id) |>
+      slice_min(dist_m, n = 1, with_ties = FALSE) |>
+      ungroup() |>
+      select(image_id, tow_id, dist_to_tow_m = dist_m, cumul_dist_tow = cumul_at_foot)
+  }
+
+  # Stage 1: every image x every tow at the same reef
+  candidates <- rs_images |>
+    select(image_id, reef_code, image_datetime_utc, rx, ry) |>
+    inner_join(tow_windows, by = "reef_code", relationship = "many-to-many") |>
+    mutate(in_window = image_datetime_utc >= tow_start_utc & image_datetime_utc <= tow_end_utc)
+
+  temporal_ids <- candidates |> filter(in_window) |> pull(image_id) |> unique()
+  single_t_ids <- candidates |> filter(in_window) |> count(image_id) |> filter(n == 1) |> pull(image_id)
+  multi_t_ids  <- candidates |> filter(in_window) |> count(image_id) |> filter(n > 1)  |> pull(image_id)
+  no_temp_ids  <- setdiff(candidates |> pull(image_id) |> unique(), temporal_ids)
+
+  # Stage 2: temporal assignment (several windows -> KML-nearest tow)
+  assign_temporal <- candidates |>
+    filter(image_id %in% single_t_ids, in_window) |>
+    select(image_id, tow_id, rx, ry) |>
+    kml_min_dist() |>
+    mutate(match_method = "temporal")
+  assign_temporal <- bind_rows(
+    assign_temporal,
+    candidates |>
+      filter(image_id %in% multi_t_ids, in_window) |>
+      select(image_id, tow_id, rx, ry) |>
+      kml_min_dist() |>
+      group_by(image_id) |>
+      slice_min(dist_to_tow_m, n = 1, with_ties = FALSE) |>
+      ungroup() |>
+      mutate(match_method = "temporal")
+  )
+
+  # Stage 3: temporal matches beyond the cutoff -> nearest same-reef tow, dropped if still beyond
+  temporal_ok     <- assign_temporal |> filter(dist_to_tow_m <= dist_cutoff_m)
+  need_rescue_ids <- assign_temporal |> filter(dist_to_tow_m > dist_cutoff_m) |> pull(image_id)
+  assign_rescued <- candidates |>
+    filter(image_id %in% need_rescue_ids) |>
+    distinct(image_id, tow_id, rx, ry) |>
+    kml_min_dist() |>
+    group_by(image_id) |>
+    slice_min(dist_to_tow_m, n = 1, with_ties = FALSE) |>
+    ungroup() |>
+    filter(dist_to_tow_m <= dist_cutoff_m) |>
+    mutate(match_method = "spatial")
+
+  # Stage 4: no temporal match -> nearest same-reef tow within the cutoff
+  assign_spatial <- candidates |>
+    filter(image_id %in% no_temp_ids) |>
+    distinct(image_id, tow_id, rx, ry) |>
+    kml_min_dist() |>
+    group_by(image_id) |>
+    slice_min(dist_to_tow_m, n = 1, with_ties = FALSE) |>
+    ungroup() |>
+    filter(dist_to_tow_m <= dist_cutoff_m) |>
+    mutate(match_method = "spatial")
+
+  assignments <- bind_rows(temporal_ok, assign_rescued, assign_spatial) |> distinct(image_id, .keep_all = TRUE)
+  message(sprintf("INGEST: matched %d / %d images (%d temporal, %d spatial); %d without a reef/tow candidate",
+                  nrow(assignments), nrow(rs_images), sum(assignments$match_method == "temporal"),
+                  sum(assignments$match_method == "spatial"), nrow(rs_images) - n_distinct(candidates$image_id)))
+
+  reefscan_tows <- reefscan |>
+    select(-image_datetime_utc, -image_name) |>
+    left_join(assignments |> select(image_id, tow_id, dist_to_tow_m, cumul_dist_tow, match_method), by = "image_id")
+
+  # (manta_tows.parquet was already written, before the matching)
+  arrow::write_parquet(reefscan_tows, ingest_rss)
+  message("INGEST: written ", ingest_manta, " and ", ingest_rss)
+})
+if (!rebuild_ingest) message("INGEST: using cached ", ingest_dir, " (options(br04.rebuild_ingest = TRUE) to rebuild)")
+
 # ---- Read manta tow data ----
 {
-mt <- arrow::read_parquet("data/raw/manta_tows/manta_tows.parquet") |>
+mt <- arrow::read_parquet(ingest_manta) |>
   rename(
     reef_label    = `Reef label`,
     reef_name     = `Reef name`,
@@ -147,7 +574,7 @@ cat("manta (post 3-voyage exclusion):", nrow(mt), "tows,", n_distinct(mt$reef_la
 
 # ---- Read ReefScan Surface / Deep point-level data ----
 {
-rs_surface_raw <- arrow::read_parquet("data/raw/reefscan_surface_coral/reefscan_tows.parquet") |>
+rs_surface_raw <- arrow::read_parquet(ingest_rss) |>
   select(
     tow_id, site_reef_name, site_code,
     survey_date, image_latitude, image_longitude,
@@ -484,8 +911,9 @@ aggregate_hc_sc_inline <- function(points, group_col) {
 # Where coral cover exists from the same imagery, a missing detection count means zero.
 zero_fill_when_observed_inline <- function(x, observed) if_else(observed & is.na(x), 0, x)
 
-# ---- Pre-built COTSpotter counts (from 00a_build_cotspotter_detections.R) ----
+# ---- COTSpotter counts (built by 00a_build_cotspotter_detections.R from the ingested tows) ----
 {
+source("scripts/00a_build_cotspotter_detections.R", local = new.env())
 rs_surface_cots      <- read_csv("data/derived/cotspotter_surface_tow_counts.csv", show_col_types = FALSE) |> mutate(tow_id = as.character(tow_id))
 rsd_cots_tow         <- read_csv("data/derived/cotspotter_deep_tow_counts.csv", show_col_types = FALSE) |> mutate(tow_id = as.character(tow_id))
 rsd_cots_cull        <- read_csv("data/derived/cotspotter_deep_cull_site_counts.csv", show_col_types = FALSE)

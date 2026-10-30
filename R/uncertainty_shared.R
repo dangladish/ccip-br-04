@@ -40,7 +40,7 @@ compute_deep_cell_summary <- function(rs_deep_raw, reef_xwalk) {
 # applied when building the canonical tables.
 load_rs_deep_raw_3voyage_excluded <- function(
   path = "data/raw/reefscan_deep/reefcloud-point-classification-GRB-ReefScan-Deep-2026-08-13-filtered.csv",
-  manta_path = "data/raw/manta_tows/manta_tows.parquet",
+  manta_path = "data/derived/ingest/manta_tows.parquet",
   exclude_voyages = c("FMPCRS 2024-05", "FMPCRS 2025-01", "FMPCRS 2026-03")
 ) {
   rs_deep_raw <- readr::read_csv(path, show_col_types = FALSE)

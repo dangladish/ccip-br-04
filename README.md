@@ -13,7 +13,7 @@ final report.
 
 ```
 scripts/
-  00a_build_cotspotter_detections.R   COTSpotter detections -> tow/cull-site/reef counts
+  00a_build_cotspotter_detections.R   COTSpotter detections -> tow/cull-site/reef counts (sourced by 00)
   00_read_and_build_data.R            raw sources -> tow_level / cull_site_level / reef_level
   01_coral_calibration.R              coral cover models (driver)
   02_cots_calibration.R               COTS models (driver)
@@ -33,8 +33,7 @@ Open `ccip-br-04.Rproj` (scripts use paths relative to the repository root),
 place the inputs under `data/raw/`, then run in order:
 
 ```r
-source("scripts/00a_build_cotspotter_detections.R")
-source("scripts/00_read_and_build_data.R")
+source("scripts/00_read_and_build_data.R")   # ingest, then sources 00a (COTSpotter counts)
 source("scripts/01_coral_calibration.R")
 source("scripts/02_cots_calibration.R")
 source("scripts/03_uncertainty_report.R")
@@ -51,10 +50,13 @@ source("scripts/jobs/plot_reef_spatial_overview.R")    # reef map and example re
 source("scripts/jobs/build_shiny_app_data.R")          # Shiny data bundle
 ```
 
-**Inputs under `data/raw/`:** `manta_tows/` (`manta_tows.parquet`,
-`260529-COTS-Manta-Cull-RHIS.xlsx` read from sheet `RHIS`, `manta_scar_counts.csv` (per-tow feeding-scar
+**Inputs under `data/raw/`:** `manta_tows/` (the voyage folders `QPWS_FMPCRS_*` with the EotR `Eotr_CotsSurveillanceReport*.xlsx`
+workbooks (tow and observer level) and `*HardCoral*.kml` GPS tracks, from which `scripts/00_` builds
+`data/derived/ingest/manta_tows.parquet`; `260529-COTS-Manta-Cull-RHIS.xlsx` read from sheet `RHIS`, `manta_scar_counts.csv` (per-tow feeding-scar
 counts from the workbook's `Manta` sheet, produced by `scripts/jobs/extract_manta_scar_counts.pl`; run it
-only if you start from the full workbook), and the voyage `*.kml` tracks used only for the example-reef map); `reefscan_surface_coral/reefscan_tows.parquet`;
+only if you start from the full workbook));
+`reefscan_surface_coral/` (ReefCloud point-classification CSV, optionally `.gz`, matched to tows by `scripts/00_` into
+`data/derived/ingest/reefscan_surface_tows.parquet`);
 `reefscan_deep/` (ReefScan Deep point-classification CSV); `reefscan_cots/csv_files/*.csv`
 (COTSpotter exports); `eDNA/eDNA_BR_02.csv` and `eDNA/RJFMP25_26 Results.csv`;
 `COTS Control Program Cull Sites - External/Cull_Sites_Master.shp`.
@@ -99,6 +101,6 @@ repository root and the pipeline above runs as written.
 
 ## Licence and citation
 
-GNU General Public License, version 2 or (at your option) any later version;
+GNU General Public License, version 3 or (at your option) any later version;
 see [LICENSE](LICENSE). The raw input data are not covered by this licence.
 To cite this repository, see [CITATION.cff](CITATION.cff).

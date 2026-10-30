@@ -5,7 +5,8 @@
 ## detection-level plus tow / cull-site / reef count tables for BOTH
 ## ReefScan platforms: Deep (AIMS_RSD) and Surface (AIMS_RSS).
 ##
-## Run this BEFORE 00_read_and_build_data.R, which reads its outputs.
+## Sourced by 00_read_and_build_data.R after its ingest step; also runnable on its own once
+## data/derived/ingest/manta_tows.parquet exists.
 ##
 ## Inputs
 ##   data/raw/reefscan_cots/csv_files/*.csv
@@ -14,7 +15,7 @@
 ##       latitude, longitude, depth_m, cots_video_sequence_length,
 ##       ML_model_confidence, certified_by, certified_at.
 ##       `platform` is AIMS_RSD (deep) or AIMS_RSS (surface).
-##   data/raw/manta_tows/manta_tows.parquet      (tow geometry + reef labels)
+##   data/derived/ingest/manta_tows.parquet      (tow geometry + reef labels)
 ##   data/raw/COTS Control Program Cull Sites - External/Cull_Sites_Master.shp
 ##
 ## Reef resolution: `site_name` mostly matches the manta `reef_label`
@@ -114,7 +115,7 @@ assign_nearest_tow <- function(lon, lat, reef_label, manta_lines,
 
 # All voyages are used here; any voyage exclusion happens in
 # 00_read_and_build_data.R. Tows without a usable distance are dropped.
-manta <- read_parquet("data/raw/manta_tows/manta_tows.parquet") |>
+manta <- read_parquet("data/derived/ingest/manta_tows.parquet") |>
   rename(reef_label = `Reef label`) |>
   mutate(tow_distance_m = as.numeric(tow_distance_m)) |>
   filter(!is.na(tow_distance_m), tow_distance_m > 0)
