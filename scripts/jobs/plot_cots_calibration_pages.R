@@ -108,20 +108,20 @@ build_stacked_page <- function(filename, title, ylab, row_labels, ncol_data, cel
 
 # ---- Shared data: predictor densities per level ----
 
-ms_tow_scar <- ms_tow |> left_join(ms_tow_bin |> select(tow_id, has_scar), by = "tow_id") |>
-  filter(!is.na(has_scar)) |> mutate(manta_combined_tow = y_manta + has_scar)
+ms_tow_scar <- ms_tow |> left_join(ms_tow_bin |> select(tow_id, scar_count), by = "tow_id") |>
+  filter(!is.na(scar_count)) |> mutate(manta_combined_tow = y_manta + scar_count)
 dens_surf_tow  <- ms_tow_scar$y_surf / ms_tow_scar$effort_surf
 dens_manta_tow <- ms_tow_scar$manta_combined_tow / ms_tow_scar$effort_manta_tow
 
 dens_surf_cull <- ms_cull$y_surf / ms_cull$effort_surf
 dens_deep_cull <- md_cull$y_deep / md_cull$effort_deep
-dens_manta_ms_cull <- (ms_cull$y_manta + ms_cull$feeding_scars) / ms_cull$effort_manta
-dens_manta_md_cull <- (md_cull$y_manta + md_cull$feeding_scars) / md_cull$effort_manta
+dens_manta_ms_cull <- (ms_cull$y_manta + ms_cull$scar_count) / ms_cull$effort_manta
+dens_manta_md_cull <- (md_cull$y_manta + md_cull$scar_count) / md_cull$effort_manta
 
 dens_surf_reef <- ms_reef$y_surf / ms_reef$effort_surf
 dens_deep_reef <- md_reef$y_deep / md_reef$effort_deep
-dens_manta_ms_reef <- (ms_reef$y_manta + ms_reef$feeding_scars) / ms_reef$effort_manta
-dens_manta_md_reef <- (md_reef$y_manta + md_reef$feeding_scars) / md_reef$effort_manta
+dens_manta_ms_reef <- (ms_reef$y_manta + ms_reef$scar_count) / ms_reef$effort_manta
+dens_manta_md_reef <- (md_reef$y_manta + md_reef$scar_count) / md_reef$effort_manta
 
 lvl_labels <- c("Tow level", "Cull-site level", "Reef level")
 

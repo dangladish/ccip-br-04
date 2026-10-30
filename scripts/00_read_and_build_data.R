@@ -97,10 +97,39 @@ mt <- arrow::read_parquet("data/raw/manta_tows/manta_tows.parquet") |>
     voyage  = factor(voyage),
     vessel  = factor(vessel),
 
-    # Presence indicator only: the source records a/p/c codes, not counts.
+    # Presence indicator; the parquet holds only the a/p/c scar category
+    # (absent / present = 1-10 / common = >10 scars per tow).
     scar_present = as.integer(feeding_scars %in% c("p", "c"))
   ) |>
   filter(!is.na(tow_distance_m), tow_distance_m > 0)
+
+# ---- Feeding-scar count per tow ----
+# ScarsCount is recorded for tows from 14 June 2025 (FMPCRS 2025-03 onward); extracted from the
+# workbook by scripts/jobs/extract_manta_scar_counts.pl. FMPCRS 2025-02 has no count, so its
+# scarred tows are imputed from the category: present = 2, common = 11.
+scar_impute <- c(p = 2, c = 11)
+scar_counts <- readr::read_csv("data/raw/manta_tows/manta_scar_counts.csv", col_types = "ccd", progress = FALSE) |>
+  transmute(tow_id, scar_code_wb = scar_code, scars_count_obs = scars_count)
+mt <- mt |>
+  left_join(scar_counts, by = "tow_id") |>
+  mutate(
+    scar_count_imputed = is.na(scars_count_obs) & scar_present == 1,
+    scar_count = case_when(
+      !is.na(scars_count_obs) ~ scars_count_obs,
+      scar_present == 0       ~ 0,
+      TRUE                    ~ unname(scar_impute[feeding_scars])
+    )
+  )
+stopifnot(
+  all(mt$scar_code_wb == mt$feeding_scars, na.rm = TRUE),
+  all(mt$scars_count_obs[mt$feeding_scars == "a"] == 0, na.rm = TRUE),
+  all(mt$scars_count_obs[mt$feeding_scars == "p"] %in% c(NA, 1:10)),
+  all(mt$scars_count_obs[mt$feeding_scars == "c"] >= 11, na.rm = TRUE),
+  !anyNA(mt$scar_count)
+)
+cat("scar count: recorded for", sum(!is.na(mt$scars_count_obs)), "of", nrow(mt), "tows; imputed for",
+    sum(mt$scar_count_imputed), "scarred tows (present = 2, common = 11)
+")
 
 cat("manta (pre-exclusion):", nrow(mt), "tows,", n_distinct(mt$reef_label), "reefs\n")
 
@@ -533,7 +562,7 @@ tow_level <- tow_level |>
   select(
     tow_id, tow_date, tow_datetime, voyage, vessel, survey_folder, source_file,
     reef_label, reef_name, cull_site, dist_cull_m,
-    cots_observed, feeding_scars, scar_present,
+    cots_observed, feeding_scars, scar_present, scar_count, scar_count_imputed,
     hard_coral, soft_coral, recently_dead, bleach_sev, bleach_ext,
     surveyor_id, surveyor_level, tow_distance_m,
     tow_mid_lon, tow_mid_lat, perc_hard, perc_soft,
@@ -570,6 +599,8 @@ manta_surf_cull <- tow_level |>
     cots_observed                    = sum(cots_observed, na.rm = TRUE),
     cots_observed_se                 = pois_sum_se(cots_observed),
     feeding_scars                    = sum(scar_present, na.rm = TRUE),
+    scar_count                       = sum(scar_count, na.rm = TRUE),
+    n_scar_tows_imputed              = sum(scar_count_imputed, na.rm = TRUE),
     manta_combined                   = sum(has_manta_tow, na.rm = TRUE),
     n_tows_with_surf                 = sum(!is.na(pct_HC_surf)),
     pct_HC_surf_se                   = mean_se(pct_HC_surf),
@@ -666,6 +697,8 @@ manta_reef <- tow_level |>
     cots_observed                     = sum(cots_observed, na.rm = TRUE),
     cots_observed_se                  = pois_sum_se(cots_observed),
     feeding_scars                     = sum(scar_present, na.rm = TRUE),
+    scar_count                        = sum(scar_count, na.rm = TRUE),
+    n_scar_tows_imputed               = sum(scar_count_imputed, na.rm = TRUE),
     manta_combined                    = sum(has_manta_tow, na.rm = TRUE),
     n_tows_reefscan_surface_cots_obs  = sum(!is.na(cots_reefscan_surface)),
     .groups = "drop"

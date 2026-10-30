@@ -12,6 +12,7 @@
 ## and curves come from predict_*_curve()).
 
 library(tidyverse)
+library(brms)
 
 fig_dir  <- "output/figures"
 post_dir <- "output/posteriors"
@@ -110,7 +111,7 @@ plot_row(predict_negbin_curve_density(post, x_seq, mean(ms_cull$effort_manta), e
 
 cots_panel_i <- cots_panel_i + 1
 post <- load_post("surf_from_manta_cull_cots")
-dens_manta_comb_s <- (ms_cull$y_manta + ms_cull$feeding_scars) / ms_cull$effort_manta
+dens_manta_comb_s <- (ms_cull$y_manta + ms_cull$scar_count) / ms_cull$effort_manta
 x_seq <- seq(0, max(dens_manta_comb_s), length.out = 100)
 plot_row(predict_negbin_curve_density(post, x_seq, mean(ms_cull$effort_surf), eps = 0.01),
          dens_manta_comb_s, ms_cull$y_surf / ms_cull$effort_surf,
@@ -128,7 +129,7 @@ plot_row(predict_negbin_curve_density(post, x_seq, mean(md_cull$effort_manta), e
 
 cots_panel_i <- cots_panel_i + 1
 post <- load_post("deep_from_manta_cull_cots")
-dens_manta_comb_d <- (md_cull$y_manta + md_cull$feeding_scars) / md_cull$effort_manta
+dens_manta_comb_d <- (md_cull$y_manta + md_cull$scar_count) / md_cull$effort_manta
 x_seq <- seq(0, max(dens_manta_comb_d), length.out = 100)
 plot_row(predict_negbin_curve_density(post, x_seq, mean(md_cull$effort_deep), eps = 0.01),
          dens_manta_comb_d, md_cull$y_deep / md_cull$effort_deep,
@@ -159,6 +160,7 @@ cat("Saved", file.path(fig_dir, "report_cots_crossmethod_cull_all_pairs.png"), "
 ## eDNAconc_from_manta_reef is predicted with log_offset = 0 (no assay offset in that model),
 ## unlike the density-scale curves above.
 edna_raw <- readRDS("data/derived/edna_raw.RDS")
+reef_xwalk <- readRDS("data/derived/reef_xwalk.RDS")
 xwalk    <- reef_xwalk |> filter(has_edna) |> select(edna_reef, reef_label)
 
 source("models/cots/edna_calibration_data_prep.R")  # builds edna_reef, reef_manta, reef_surf

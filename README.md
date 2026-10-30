@@ -52,8 +52,9 @@ source("scripts/jobs/build_shiny_app_data.R")          # Shiny data bundle
 ```
 
 **Inputs under `data/raw/`:** `manta_tows/` (`manta_tows.parquet`,
-`260529-COTS-Manta-Cull-RHIS.xlsx` read from sheet `RHIS`, and the voyage
-`*.kml` tracks used only for the example-reef map); `reefscan_surface_coral/reefscan_tows.parquet`;
+`260529-COTS-Manta-Cull-RHIS.xlsx` read from sheet `RHIS`, `manta_scar_counts.csv` (per-tow feeding-scar
+counts from the workbook's `Manta` sheet, produced by `scripts/jobs/extract_manta_scar_counts.pl`; run it
+only if you start from the full workbook), and the voyage `*.kml` tracks used only for the example-reef map); `reefscan_surface_coral/reefscan_tows.parquet`;
 `reefscan_deep/` (ReefScan Deep point-classification CSV); `reefscan_cots/csv_files/*.csv`
 (COTSpotter exports); `eDNA/eDNA_BR_02.csv` and `eDNA/RJFMP25_26 Results.csv`;
 `COTS Control Program Cull Sites - External/Cull_Sites_Master.shp`.

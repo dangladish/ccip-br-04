@@ -143,7 +143,7 @@ for (p in msmd_pairs) {
     yB <- d[[p$y_col]]; effB <- d[[p$eff_col]]
     combined <- d$manta_combined
     # Manta predictor density: COTS count + scar count, summed (not the OR indicator)
-    dens_B <- yB / effB; dens_manta_comb <- (y_manta + d$feeding_scars) / eff_manta
+    dens_B <- yB / effB; dens_manta_comb <- (y_manta + d$scar_count) / eff_manta
 
     post <- load_post(sprintf("manta_from_%s_combined_%s_cots", p$prefix, lvl))
     x_seq <- seq(0, max(dens_B, na.rm = TRUE), length.out = 100)
@@ -198,9 +198,9 @@ for (lvl in c("cull", "reef")) {
 }
 
 # Manta <-> RS Surface, tow level. Manta-as-response is binary (cloglog);
-# RS Surface-as-response uses the combined manta predictor (y_manta + has_scar).
-ms_tow_scar <- ms_tow |> left_join(ms_tow_bin |> select(tow_id, has_scar), by = "tow_id") |> filter(!is.na(has_scar)) |>
-  mutate(manta_combined_tow = y_manta + has_scar)
+# RS Surface-as-response uses the combined manta predictor (y_manta + scar_count).
+ms_tow_scar <- ms_tow |> left_join(ms_tow_bin |> select(tow_id, scar_count), by = "tow_id") |> filter(!is.na(scar_count)) |>
+  mutate(manta_combined_tow = y_manta + scar_count)
 
 post <- load_post("manta_from_surf_tow_cots")
 x_seq <- seq(0, max(ms_tow_bin$surf_density, na.rm = TRUE), length.out = 100)
@@ -226,8 +226,8 @@ try_add <- function(label, expr) {
   res <- tryCatch(expr, error = function(e) { message("SKIPPED ", label, ": ", conditionMessage(e)); NULL })
   if (!is.null(res)) add_result(res)
 }
-md_tow_scar <- md_tow |> left_join(md_tow_bin |> select(tow_id, has_scar), by = "tow_id") |> filter(!is.na(has_scar)) |>
-  mutate(manta_combined_tow = y_manta + has_scar)
+md_tow_scar <- md_tow |> left_join(md_tow_bin |> select(tow_id, scar_count), by = "tow_id") |> filter(!is.na(scar_count)) |>
+  mutate(manta_combined_tow = y_manta + scar_count)
 
 try_add("manta_from_surf_combined_tow_cots", {
   post <- load_post("manta_from_surf_combined_tow_cots")

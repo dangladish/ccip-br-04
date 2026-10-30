@@ -168,7 +168,7 @@ about_ui <- nav_panel(
           "segments (tow), cull sites and reefs. Coral cover uses Beta regression, COTS counts negative",
           "binomial with an effort offset, and presence/absence binomial; predictions assume a typical",
           "sampling effort for the predicted method. Manta coral cover is ordinal (converted to category",
-          "midpoints), and \u201ccombined\u201d manta COTS measures add feeding scars to counts. The table's",
+          "midpoints), and the \u201ccombined\u201d manta COTS predictor adds the feeding-scar count to the COTS count (scars for FMPCRS 2025-02 imputed from the present/common category). The table's",
           "\u201cslope\u201d is on the model's link scale.")
       ),
       card(

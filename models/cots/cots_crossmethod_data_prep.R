@@ -28,38 +28,39 @@ sd_tow <- tow_level |> filter(!is.na(cots_reefscan_surface), !is.na(cots_reefsca
   transmute(tow_id, reef_label, y_surf = cots_reefscan_surface, effort_surf = 1, y_deep = cots_reefscan_deep, effort_deep = 1)
 
 # ---- Tow level: binary tables (manta as response) ----
-# has_manta = scar present OR >= 1 COTS observed. has_scar is kept because the manta-as-predictor
-# models sum scar presence with the COTS count.
+# has_manta = scar present OR >= 1 COTS observed. scar_count (feeding scars counted on the tow) is kept
+# because the tow-level models sum it with the COTS count.
 ms_tow_bin <- tow_level |>
   filter(!is.na(scar_present), !is.na(cots_reefscan_surface), !is.na(tow_distance_m),
          tow_distance_m > 0, !is.na(n_pts_surf)) |>
   transmute(tow_id, reef_label, has_manta = as.integer(scar_present == 1 | cots_observed > 0),
-            has_scar = scar_present, tow_dist = tow_distance_m,
+            scar_count, tow_dist = tow_distance_m,
             surf_density = cots_reefscan_surface)
 md_tow_bin <- tow_level |>
   filter(!is.na(scar_present), !is.na(cots_reefscan_deep), !is.na(tow_distance_m),
          tow_distance_m > 0, !is.na(n_pts_deep)) |>
   transmute(tow_id, reef_label, has_manta = as.integer(scar_present == 1 | cots_observed > 0),
-            has_scar = scar_present, tow_dist = tow_distance_m,
+            scar_count, tow_dist = tow_distance_m,
             deep_density = cots_reefscan_deep)
 
 # ---- Cull-site and reef tables ----
 # Manta effort is n_tows here (a tow count); tow level uses tow_distance_m.
-# feeding_scars = number of tows with scars present (manta records only a/p/c presence, not a
-# tally); needed only where manta is involved.
+# feeding_scars = number of tows with scars present; scar_count = total feeding scars counted
+# (recorded, or imputed where no count exists; see 00_read_and_build_data.R). Needed only where
+# manta is involved.
 # manta_combined / manta_combined_rate = tows with scar OR COTS observed (response). The manta
-# predictor is (y_manta + feeding_scars) / effort_manta.
+# predictor is (y_manta + scar_count) / effort_manta.
 ms_cull <- cull_site_level |> filter(!is.na(cots_observed), !is.na(cots_reefscan_surface), !is.na(n_tows), !is.na(n_pts_surf)) |>
-  transmute(cull_site, reef_label, y_manta = cots_observed, effort_manta = n_tows, y_surf = cots_reefscan_surface, effort_surf = n_tows, feeding_scars, manta_combined, manta_combined_rate)
+  transmute(cull_site, reef_label, y_manta = cots_observed, effort_manta = n_tows, y_surf = cots_reefscan_surface, effort_surf = n_tows, feeding_scars, scar_count, manta_combined, manta_combined_rate)
 md_cull <- cull_site_level |> filter(!is.na(cots_observed), !is.na(cots_reefscan_deep), !is.na(n_tows), !is.na(n_pts_deep)) |>
-  transmute(cull_site, reef_label, y_manta = cots_observed, effort_manta = n_tows, y_deep = cots_reefscan_deep, effort_deep = n_tows, feeding_scars, manta_combined, manta_combined_rate)
+  transmute(cull_site, reef_label, y_manta = cots_observed, effort_manta = n_tows, y_deep = cots_reefscan_deep, effort_deep = n_tows, feeding_scars, scar_count, manta_combined, manta_combined_rate)
 sd_cull <- cull_site_level |> filter(!is.na(cots_reefscan_surface), !is.na(cots_reefscan_deep), !is.na(n_pts_surf), !is.na(n_pts_deep), !is.na(n_tows), n_tows > 0) |>
   transmute(cull_site, reef_label, y_surf = cots_reefscan_surface, effort_surf = n_tows, y_deep = cots_reefscan_deep, effort_deep = n_tows)
 
 ms_reef <- reef_level |> filter(!is.na(cots_observed), !is.na(cots_reefscan_surface), !is.na(n_tows), !is.na(n_pts_surf_reef)) |>
-  transmute(reef_label, y_manta = cots_observed, effort_manta = n_tows, y_surf = cots_reefscan_surface, effort_surf = n_tows, feeding_scars, manta_combined, manta_combined_rate)
+  transmute(reef_label, y_manta = cots_observed, effort_manta = n_tows, y_surf = cots_reefscan_surface, effort_surf = n_tows, feeding_scars, scar_count, manta_combined, manta_combined_rate)
 md_reef <- reef_level |> filter(!is.na(cots_observed), !is.na(cots_reefscan_deep), !is.na(n_tows), !is.na(n_pts_deep_reef)) |>
-  transmute(reef_label, y_manta = cots_observed, effort_manta = n_tows, y_deep = cots_reefscan_deep, effort_deep = n_tows, feeding_scars, manta_combined, manta_combined_rate)
+  transmute(reef_label, y_manta = cots_observed, effort_manta = n_tows, y_deep = cots_reefscan_deep, effort_deep = n_tows, feeding_scars, scar_count, manta_combined, manta_combined_rate)
 sd_reef <- reef_level |> filter(!is.na(cots_reefscan_surface), !is.na(cots_reefscan_deep), !is.na(n_pts_surf_reef), !is.na(n_pts_deep_reef), !is.na(n_tows), n_tows > 0) |>
   transmute(reef_label, y_surf = cots_reefscan_surface, effort_surf = n_tows, y_deep = cots_reefscan_deep, effort_deep = n_tows)
 

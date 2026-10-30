@@ -43,13 +43,13 @@ manta_cots_per_ha_factor <- 68
 
 reef_manta <- edna_reef |>
   inner_join(
-    reef_level |> select(reef_label, cots_observed, feeding_scars, n_tows, scar_rate, cots_rate,
+    reef_level |> select(reef_label, cots_observed, feeding_scars, scar_count, n_tows, scar_rate, cots_rate,
                          manta_combined, manta_combined_rate),
     by = "reef_label"
   ) |>
   filter(n_tows > 0) |>
   mutate(
-    manta_count       = cots_observed + feeding_scars,
+    manta_count       = cots_observed + scar_count,
     manta_density_raw = manta_count / n_tows,
     manta_density      = manta_density_raw * manta_cots_per_ha_factor
   )

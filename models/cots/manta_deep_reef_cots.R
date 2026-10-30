@@ -15,7 +15,7 @@ post_manta_from_deep_combined_reef_cots <- fit_crossmethod_pair(md_reef$manta_co
 
 post_manta_from_deep_binary_reef_cots <- fit_binary_crossmethod_cull_reef_pair(md_reef$manta_combined, md_reef$effort_manta, md_reef$y_deep / md_reef$effort_deep, 0.01, md_reef$reef_label, "manta_from_deep_binary_reef_cots", "reef")
 
-post_deep_from_manta_reef_cots <- fit_crossmethod_pair(md_reef$y_deep, md_reef$effort_deep, md_reef$y_manta + md_reef$feeding_scars, md_reef$effort_manta, NULL, 0.01, "deep_from_manta_reef_cots", "reef")
+post_deep_from_manta_reef_cots <- fit_crossmethod_pair(md_reef$y_deep, md_reef$effort_deep, md_reef$y_manta + md_reef$scar_count, md_reef$effort_manta, NULL, 0.01, "deep_from_manta_reef_cots", "reef")
 
 if (doPlot) {
   plot_crossmethod_pair_density(post_manta_from_deep_combined_reef_cots, md_reef$manta_combined, md_reef$effort_manta, md_reef$y_deep, md_reef$effort_deep, "RS Deep density (COTS/tow)", "Manta combined COTS+scar density (per tow)", "Manta combined COTS+scar density from RS Deep, reef level")
@@ -26,6 +26,6 @@ if (doPlot) {
                    md_reef$y_deep / md_reef$effort_deep, md_reef$manta_combined / md_reef$effort_manta,
                    "RS Deep density", "Manta combined COTS+scar presence rate", "Manta combined COTS+scar presence rate from RS Deep, reef level")
 
-  plot_crossmethod_pair_density(post_deep_from_manta_reef_cots, md_reef$y_deep, md_reef$effort_deep, md_reef$y_manta + md_reef$feeding_scars, md_reef$effort_manta, "Manta density (combined COTS+scar count / tow)", "RS Deep COTS density (per tow)", "RS Deep density from Manta combined COTS+scar, reef level")
+  plot_crossmethod_pair_density(post_deep_from_manta_reef_cots, md_reef$y_deep, md_reef$effort_deep, md_reef$y_manta + md_reef$scar_count, md_reef$effort_manta, "Manta density (combined COTS+scar count / tow)", "RS Deep COTS density (per tow)", "RS Deep density from Manta combined COTS+scar, reef level")
 }
 cat("\nmanta_deep_reef_cots.R complete -- 3 posteriors saved, reef level.\n")
