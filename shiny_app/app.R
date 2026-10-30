@@ -422,8 +422,8 @@ ui <- page_navbar(
       sidebar = sidebar(
         width = 320,
         radioButtons("uc_quantity", "Quantity:",
-                     choices = c("Hard coral cover (proportion)", "COTS count (per tow or survey)"),
-                     selected = "Hard coral cover (proportion)"),
+                     choices = c("Hard coral cover (%)", "COTS count (per tow or survey)"),
+                     selected = "Hard coral cover (%)"),
         conditionalPanel(
           condition = "input.uc_quantity == 'COTS count (per tow or survey)'",
           input_switch(
@@ -1651,7 +1651,7 @@ server <- function(input, output, session) {
   output$uc_caveat <- renderText({
     msgs <- c(paste(
       "Descriptive only: RHIS is not part of the pairwise calibration models",
-      "(it has no tow-level grain), so it appears only on this tab."
+      "(it has no tow-level grain), so it appears only on this tab. RHIS coral cover is hard coral only."
     ))
 
     if (uc_log1p_active()) {

@@ -90,7 +90,7 @@ p_coral_gbr <- ggplot(pooled_coral, aes(y = method, x = mean, color = method)) +
   guides(color = "none") +
   labs(
     y = NULL,
-    x = "Hard coral cover proportion",
+    x = "Hard coral cover (%)",
     title = "GBR-wide coral cover: method comparison, all reefs pooled",
     subtitle = "Point = mean across every sub-reef unit, all reefs combined",
     caption = uncertainty_caption
@@ -137,7 +137,7 @@ p_cots_log_gbr_simple <- p_cots_log_gbr +
     title = "GBR-wide COTS counts (log1p scale)",
     subtitle = NULL,
     caption = NULL,
-    x = "COTS observed (count per tow, log1p scale)"
+    x = "COTS observed (count per tow or survey, log1p scale)"
   )
 
 p_gbr_pooled_combined <- p_coral_gbr_simple / p_cots_log_gbr_simple
@@ -165,7 +165,7 @@ p_coral <- ggplot(combined_coral, aes(y = reef_label, x = mean, color = method))
   guides(color = "none") +
   labs(
     y = "Reef (ordered by reef ID)",
-    x = "Hard coral cover proportion",
+    x = "Hard coral cover (%)",
     title = "Reef-level Coral cover"
   ) +
   theme(

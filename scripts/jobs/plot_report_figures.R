@@ -24,6 +24,8 @@ plot_row <- function(pred, obs_x, obs_y, xlab, ylab, main, scale100 = FALSE, yli
   cols <- cbind(pred$mean, pred$lo95, pred$hi95, pred$pi_lo95, pred$pi_hi95) * mult
   x <- pred$x * mult; ox <- obs_x * mult; oy <- obs_y * mult
   if (is.null(ylim)) ylim <- range(c(cols, oy), na.rm = TRUE); xlim <- range(c(x, ox), na.rm = TRUE)
+  # Coral cover panels start the x-axis at 0
+  if (scale100) xlim[1] <- min(0, xlim[1])
   matplot(x, cols, type = "l", lty = c(1, 2, 2, 3, 3), lwd = c(2, 1, 1, 1, 1),
           col = c("black", "blue", "blue", "grey45", "grey45"),
           xlab = xlab, ylab = ylab, main = main, xlim = xlim, ylim = ylim)

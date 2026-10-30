@@ -217,32 +217,39 @@ rhis_raw <- read_excel(
   sheet = "RHIS"
 )
 
-# NA in the predator/scar columns means the module was not surveyed, not zero;
-# has_predator_survey tracks the correct denominator for aggregates.
+# Blank predator/scar counts are zero (workbook README), so they are zero-filled and every
+# survey counts toward COTS means and rates; has_predator_survey records non-blank entries.
+# Hard coral cover = live coral (% of benthos) x summed live share of the 7 hard growth forms;
+# soft = live x soft share. Cover is 0 where live coral is 0; surveys without growth-form data
+# (79; 18 with live coral > 0) stay NA.
+rhis_hard_cols <- paste0("Coral", c("Branching", "Bushy", "PlateTable", "VaseFoliose",
+                                    "Encrusting", "Mushroom", "Massive"), "LiveProportion")
+rhis_scar_cols <- paste0("Predator", c("Soft", "Branching", "Bushy", "PlateTable", "VaseFoliose",
+                                       "Encrusting", "Mushroom", "Massive"), "CrownOfThornsStarfishScarCount")
+# RHIS is restricted to the two seasons the voyages cover (2024/25 and 2025/26, July-June).
+rhis_window <- as.Date(c("2024-07-01", "2026-06-30"))
 rhis <- rhis_raw |>
+  mutate(
+    hard_live_share = rowSums(across(all_of(rhis_hard_cols))),
+    scar_total      = rowSums(across(all_of(rhis_scar_cols)), na.rm = TRUE)
+  ) |>
   transmute(
     reef_label = ReefLabel,
     cull_site  = CullSite,
     survey_id  = SurveyId,
+    survey_date = as.Date(SurveyTime),
     latitude   = Latitude,
     longitude  = Longitude,
-    hc_prop_survey = BenthosLiveCoralPercentage / 100,
-    sc_prop_survey = CoralSoftCoverProportion / 100,
+    hc_prop_survey = if_else(BenthosLiveCoralPercentage == 0, 0,
+      BenthosLiveCoralPercentage / 100 * hard_live_share / 100),
+    sc_prop_survey = if_else(BenthosLiveCoralPercentage == 0, 0,
+      BenthosLiveCoralPercentage / 100 * CoralSoftLiveProportion / 100),
     has_predator_survey = !is.na(PredatorCrownOfThornsStarfishAdultIndividualCount),
-    cots_count_survey = if_else(
-      has_predator_survey,
-      PredatorCrownOfThornsStarfishAdultIndividualCount + PredatorCrownOfThornsStarfishJuvenileIndividualCount,
-      NA_real_
-    ),
-    scar_count_survey = if_else(
-      has_predator_survey,
-      PredatorSoftCrownOfThornsStarfishScarCount + PredatorBranchingCrownOfThornsStarfishScarCount +
-        PredatorBushyCrownOfThornsStarfishScarCount + PredatorPlateTableCrownOfThornsStarfishScarCount +
-        PredatorVaseFolioseCrownOfThornsStarfishScarCount + PredatorEncrustingCrownOfThornsStarfishScarCount +
-        PredatorMushroomCrownOfThornsStarfishScarCount + PredatorMassiveCrownOfThornsStarfishScarCount,
-      NA_real_
-    )
-  )
+    cots_count_survey = coalesce(PredatorCrownOfThornsStarfishAdultIndividualCount, 0) +
+      coalesce(PredatorCrownOfThornsStarfishJuvenileIndividualCount, 0),
+    scar_count_survey = scar_total
+  ) |>
+  filter(survey_date >= rhis_window[1], survey_date <= rhis_window[2])
 
 cat("RHIS:", nrow(rhis), "surveys,", n_distinct(rhis$reef_label), "reefs,",
     sum(rhis$has_predator_survey), "with predator counts\n")
@@ -621,11 +628,11 @@ rhis_cull <- rhis_scope |>
   ) |>
   mutate(
     cots_observed_rhis_se = pois_sum_se(cots_observed_rhis),
-    cots_rate_rhis         = cots_observed_rhis / n_surveys_predator_rhis,
-    cots_rate_rhis_se     = pois_rate_se(cots_observed_rhis, n_surveys_predator_rhis),
+    cots_rate_rhis         = cots_observed_rhis / n_surveys_rhis,
+    cots_rate_rhis_se     = pois_rate_se(cots_observed_rhis, n_surveys_rhis),
     scar_count_rhis_se    = pois_sum_se(scar_count_rhis),
-    scar_rate_rhis        = scar_count_rhis / n_surveys_predator_rhis,
-    scar_rate_rhis_se     = pois_rate_se(scar_count_rhis, n_surveys_predator_rhis)
+    scar_rate_rhis        = scar_count_rhis / n_surveys_rhis,
+    scar_rate_rhis_se     = pois_rate_se(scar_count_rhis, n_surveys_rhis)
   )
 
 cull_site_level <- manta_surf_cull |>
@@ -737,11 +744,11 @@ rhis_reef <- rhis |>
   ) |>
   mutate(
     cots_observed_rhis_se = pois_sum_se(cots_observed_rhis),
-    cots_rate_rhis         = cots_observed_rhis / n_surveys_predator_rhis,
-    cots_rate_rhis_se     = pois_rate_se(cots_observed_rhis, n_surveys_predator_rhis),
+    cots_rate_rhis         = cots_observed_rhis / n_surveys_rhis,
+    cots_rate_rhis_se     = pois_rate_se(cots_observed_rhis, n_surveys_rhis),
     scar_count_rhis_se    = pois_sum_se(scar_count_rhis),
-    scar_rate_rhis        = scar_count_rhis / n_surveys_predator_rhis,
-    scar_rate_rhis_se     = pois_rate_se(scar_count_rhis, n_surveys_predator_rhis)
+    scar_rate_rhis        = scar_count_rhis / n_surveys_rhis,
+    scar_rate_rhis_se     = pois_rate_se(scar_count_rhis, n_surveys_rhis)
   )
 
 reef_level <- manta_reef |>

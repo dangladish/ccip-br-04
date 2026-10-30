@@ -11,6 +11,9 @@ library(tidyverse)
 uncertainty_method_levels <- c("manta", "rs_surface", "rs_deep", "rhis")
 uncertainty_method_labels <- c("Manta tow", "ReefScan Surface", "ReefScan Deep", "RHIS")
 
+# Coral cover is reported in percent here (inputs are 0-1 proportions); RHIS is hard coral only.
+coral_quantity_label <- "Hard coral cover (%)"
+
 # ReefScan Deep coral cover has no reliable per-tow grain; a ~0.001 deg (~100 m) grid cell
 # is used as the sub-reef unit. Cells with < 5 classified points are dropped.
 compute_deep_cell_summary <- function(rs_deep_raw, reef_xwalk) {
@@ -107,14 +110,15 @@ compute_coral_uncertainty_reef <- function(tow_level, deep_cell_summ_all, rhis, 
       rhis_summ_all |> transmute(reef_label, method = "rhis", mean = rhis_mean, sd = rhis_sd, n = rhis_n)
     ) |>
     mutate(
+      mean = mean * 100,
+      sd   = sd * 100,
       method = factor(method, levels = uncertainty_method_levels, labels = uncertainty_method_labels),
-      quantity = "Hard coral cover (proportion)"
+      quantity = coral_quantity_label
     )
 }
 
-# Per-reef mean and SD of COTS count across sub-reef units. RHIS uses only surveys with the
-# predator module (NA there means not surveyed). log1p = TRUE transforms each unit's count
-# before taking mean/SD.
+# Per-reef mean and SD of COTS count across sub-reef units. RHIS uses all surveys (blank
+# predator counts are zero). log1p = TRUE transforms each unit's count before taking mean/SD.
 compute_cots_uncertainty_reef <- function(tow_level, rhis, reef_xwalk, log1p = FALSE) {
   tf <- if (log1p) base::log1p else identity
 
@@ -139,7 +143,7 @@ compute_cots_uncertainty_reef <- function(tow_level, rhis, reef_xwalk, log1p = F
     )
 
   rhis_cots_summ <- rhis |>
-    filter(reef_label %in% reef_xwalk$reef_label, has_predator_survey) |>
+    filter(reef_label %in% reef_xwalk$reef_label) |>
     mutate(rhis_v = tf(cots_count_survey)) |>
     group_by(reef_label) |>
     summarise(
@@ -185,8 +189,10 @@ compute_coral_uncertainty_pooled <- function(tow_level, deep_cell_summ_all, rhis
       mutate(method = "rhis")
   ) |>
     mutate(
+      mean = mean * 100,
+      sd   = sd * 100,
       method = factor(method, levels = uncertainty_method_levels, labels = uncertainty_method_labels),
-      quantity = "Hard coral cover (proportion)"
+      quantity = coral_quantity_label
     )
 }
 
@@ -203,7 +209,7 @@ compute_cots_uncertainty_pooled <- function(tow_level, rhis_scope, log1p = FALSE
     tow_level |> mutate(v = tf(cots_reefscan_deep)) |>
       summarise(mean = mean(v, na.rm = TRUE), sd = sd(v, na.rm = TRUE), n = sum(!is.na(v))) |>
       mutate(method = "rs_deep"),
-    rhis_scope |> filter(has_predator_survey) |> mutate(v = tf(cots_count_survey)) |>
+    rhis_scope |> mutate(v = tf(cots_count_survey)) |>
       summarise(mean = mean(v, na.rm = TRUE), sd = sd(v, na.rm = TRUE), n = n()) |>
       mutate(method = "rhis")
   ) |>
@@ -236,8 +242,10 @@ compute_coral_uncertainty_band <- function(tow_level, deep_cell_summ_all, rhis_s
     filter(n > 0) |>
     mutate(
       method = factor(method, levels = uncertainty_method_levels, labels = uncertainty_method_labels),
+      mean = mean * 100,
+      sd   = sd * 100,
       band_label = paste0(band, "-XXX"),
-      quantity = "Hard coral cover (proportion)"
+      quantity = coral_quantity_label
     )
 }
 
@@ -254,7 +262,7 @@ compute_cots_uncertainty_band <- function(tow_level, rhis_scope, log1p = FALSE) 
     tow_level |> mutate(v = tf(cots_reefscan_deep), band = reef_band(reef_label)) |> group_by(band) |>
       summarise(mean = mean(v, na.rm = TRUE), sd = sd(v, na.rm = TRUE), n = sum(!is.na(v)), .groups = "drop") |>
       mutate(method = "rs_deep"),
-    rhis_scope |> filter(has_predator_survey) |> mutate(v = tf(cots_count_survey), band = reef_band(reef_label)) |> group_by(band) |>
+    rhis_scope |> mutate(v = tf(cots_count_survey), band = reef_band(reef_label)) |> group_by(band) |>
       summarise(mean = mean(v, na.rm = TRUE), sd = sd(v, na.rm = TRUE), n = n(), .groups = "drop") |>
       mutate(method = "rhis")
   ) |>
