@@ -70,12 +70,29 @@ method_cols <- c(
   "RHIS"             = "#7B5EA7"
 )
 
-theme_csiro <- function(base_size = 13) {
+# Append " (%)" to an axis label unless it already ends in one
+add_pct <- function(lbl, cond) if (cond && !grepl("\\(%\\)\\s*$", lbl)) paste0(lbl, " (%)") else lbl
+
+# Plot height for a facet_wrap with n_panels panels in ncol columns: a fixed part (title,
+# subtitle, x axis) plus one band per row; two-line strips (level x method) need taller rows.
+facet_height_px <- function(n_panels, ncol = 2, two_line_strip = FALSE, overhead = 175, min_px = 500) {
+  rows <- ceiling(n_panels / ncol)
+  paste0(max(min_px, overhead + rows * if (two_line_strip) 215 else 190), "px")
+}
+
+# One base size for every plot; with res = 96 in renderPlot() the axis text (0.9 x base)
+# comes out at the page's body-text size.
+plot_base_size <- 14
+
+theme_csiro <- function(base_size = plot_base_size) {
   theme_bw(base_size = base_size) +
     theme(
       strip.background = element_rect(fill = csiro$tint, colour = "grey70"),
-      strip.text       = element_text(face = "bold", colour = csiro$midnight),
+      strip.text       = element_text(face = "bold", colour = csiro$midnight, size = rel(0.95)),
       plot.title       = element_text(face = "bold", colour = csiro$midnight),
+      axis.text        = element_text(colour = "grey15", size = rel(0.9)),
+      axis.title       = element_text(colour = "grey10"),
+      legend.text      = element_text(size = rel(0.9)),
       panel.grid.minor = element_blank()
     )
 }
@@ -84,19 +101,37 @@ csiro_theme <- bs_theme(
   version = 5,
   primary = csiro$deep,
   "navbar-bg" = csiro$midnight,
-  "link-color" = csiro$deep
+  "link-color" = csiro$deep,
+  "font-size-base" = "1.05rem",
+  "line-height-base" = 1.55,
+  "body-color" = "#1F2A30"
 ) |>
   bs_add_rules("
     .navbar-brand { white-space: normal; }
-    .brand-title  { font-weight: 600; font-size: 1.15rem; display: block; line-height: 1.2; }
-    .brand-sub    { font-size: 0.75rem; opacity: 0.8; display: block; font-weight: 400; }
+    .brand-title  { font-weight: 600; font-size: 1.25rem; display: block; line-height: 1.2; }
+    .brand-sub    { font-size: 0.9rem; opacity: 0.9; display: block; font-weight: 400; }
     .brand-logo   { height: 38px; margin-right: 12px; vertical-align: middle; }
     .brand-wrap   { display: inline-flex; align-items: center; }
     .navbar       { border-bottom: 4px solid #00A9CE; }
-    .app-footer   { padding: 12px 24px; font-size: 0.8rem; color: #555;
+    .navbar .nav-link { font-size: 1.05rem; }
+    .app-footer   { padding: 14px 24px; font-size: 0.9rem; line-height: 1.5; color: #3D464B;
                     border-top: 1px solid #ddd; background: #f8f9fa; }
     .app-footer a { color: #00778F; }
     .about-body h5 { color: #00313C; margin-top: 1rem; }
+    .card-header  { font-size: 1.1rem; font-weight: 600; color: #00313C; }
+    .about-body p, .about-body li { max-width: 75ch; }
+    .about-body li { margin-bottom: 0.35rem; }
+    /* tags$small() captions/caveats: default 85% grey was hard to read */
+    small, .small { font-size: 0.92rem; line-height: 1.5; color: #2F3A40; }
+    .control-label, .form-check-label, .radio label, .checkbox label { font-size: 1rem; }
+    .form-check-label { line-height: 1.4; }
+    .table { font-size: 1rem; }
+    .table th { color: #00313C; }
+    /* plots keep their set height (tall faceted views scroll) instead of shrinking to the card */
+    .shiny-plot-output { flex-shrink: 0; }
+    /* slider tick and value labels */
+    .irs--shiny .irs-grid-text { font-size: 0.8rem; color: #2F3A40; }
+    .irs--shiny .irs-min, .irs--shiny .irs-max, .irs--shiny .irs-from, .irs--shiny .irs-to, .irs--shiny .irs-single { font-size: 0.85rem; }
   ")
 
 logo_file <- sort(list.files("www", pattern = "^csiro-logo\\.(svg|png)$"), decreasing = TRUE)  # prefer svg
@@ -275,7 +310,7 @@ ui <- page_navbar(
       ),
 
       card(
-        full_screen = TRUE,
+        full_screen = TRUE, fill = FALSE,
         card_header("Calibration curves \u2013 every source method that can predict the chosen target"),
         uiOutput("plot_ui")
       ),
@@ -340,7 +375,7 @@ ui <- page_navbar(
       ),
 
       card(
-        full_screen = TRUE,
+        full_screen = TRUE, fill = FALSE,
         card_header("Calibration curves \u2013 the chosen source method predicting each target"),
         uiOutput("pf_plot_ui")
       ),
@@ -404,7 +439,7 @@ ui <- page_navbar(
       ),
 
       card(
-        full_screen = TRUE,
+        full_screen = TRUE, fill = FALSE,
         card_header("Calibration curve \u2013 chosen source and target"),
         uiOutput("ft_plot_ui")
       ),
@@ -466,7 +501,7 @@ ui <- page_navbar(
       ),
 
       card(
-        full_screen = TRUE,
+        full_screen = TRUE, fill = FALSE,
         card_header(textOutput("uc_card_header")),
         uiOutput("uc_plot_ui")
       )
@@ -556,9 +591,11 @@ server <- function(input, output, session) {
     )
   })
 
-  ## ---- Plot height grows to fit 3 stacked levels when that view is on ----
+  ## ---- Plot height follows the number of facet rows ----
   output$plot_ui <- renderUI({
-    plotOutput("pred_plot", height = if (multi_level_active()) "820px" else "500px")
+    d <- current_curves()
+    n_panels <- if (multi_level_active()) n_distinct(d$level, d$from) else n_distinct(d$from)
+    plotOutput("pred_plot", fill = FALSE, height = facet_height_px(n_panels, 2, multi_level_active()))
   })
 
   ## ---- Interpolate mean + interval at the slider value, per (level, from) ----
@@ -704,7 +741,7 @@ server <- function(input, output, session) {
 
     # y: the fixed "to" target; append the unit suffix.
     ylab_base <- if (n_distinct(d$ylab) == 1) unique(d$ylab)[1] else input$to
-    ylab_display <- paste0(ylab_base, if (is_pct || is_prob) " (%)" else "")
+    ylab_display <- add_pct(ylab_base, is_pct || is_prob)
 
     p <- p +
       labs(
@@ -717,7 +754,7 @@ server <- function(input, output, session) {
           paste("Level:", input$level)
         } else NULL
       ) +
-      theme_csiro(13)
+      theme_csiro()
 
     if (is_pct) {
       p <- p +
@@ -728,7 +765,7 @@ server <- function(input, output, session) {
     }
 
     p
-  })
+  }, res = 96)
 
   ## ---- Secondary plot: Manta tow is the "to" method and boxplot toggle is on ----
   ## Descriptive: bins Manta's response into 11 ordinal categories and boxes the source
@@ -736,11 +773,16 @@ server <- function(input, output, session) {
   output$secondary_plot_ui <- renderUI({
     if (!secondary_applicable()) return(NULL)
     card(
-      full_screen = TRUE,
+      full_screen = TRUE, fill = FALSE,
       card_header(
         "Manta tow as the PREDICTED method \u2014 empirical distribution of the source method(s) by Manta's coral-cover category"
       ),
-      plotOutput("secondary_plot", height = "380px")
+      {
+        o <- current_obs()
+        n_panels <- if (multi_level_active()) n_distinct(o$level, o$from) else n_distinct(o$from)
+        plotOutput("secondary_plot", fill = FALSE,
+                   height = facet_height_px(n_panels, 3, multi_level_active(), overhead = 195, min_px = 380))
+      }
     )
   })
 
@@ -766,7 +808,7 @@ server <- function(input, output, session) {
       geom_hline(yintercept = input$obs_value * 100, linetype = "dashed", colour = "grey40") +
       labs(
         x = "Manta tow coral cover category (midpoint, %)",
-        y = "Source method hard coral cover (%; see facet label)",
+        y = "Source method hard coral cover\n(%; see facet label)",
         subtitle = paste0(
           "Dashed line = current slider value (", round(input$obs_value * 100, 1), "%). ",
           if (multi_level) "All spatial levels; " else paste0("Level: ", input$level, "; "),
@@ -775,7 +817,7 @@ server <- function(input, output, session) {
       ) +
       scale_x_continuous(labels = function(v) paste0(v, "%")) +
       scale_y_continuous(labels = function(v) paste0(v, "%")) +
-      theme_csiro(12)
+      theme_csiro()
 
     if (multi_level) {
       p <- p + facet_wrap(vars(level, from), ncol = 3)
@@ -783,8 +825,8 @@ server <- function(input, output, session) {
       p <- p + facet_wrap(~ from, ncol = 3)
     }
 
-    p
-  })
+    wrap_subtitle(p, 95)
+  }, res = 96)
 
   ## ---- "Predicting from" tab: fixed source, facets over targets ----
   ## Free x and y scales per facet, since target units and ranges differ.
@@ -856,7 +898,9 @@ server <- function(input, output, session) {
   })
 
   output$pf_plot_ui <- renderUI({
-    plotOutput("pf_pred_plot", height = if (pf_multi_level_active()) "820px" else "500px")
+    d <- pf_current_curves()
+    n_panels <- if (pf_multi_level_active()) n_distinct(d$level, d$to) else n_distinct(d$to)
+    plotOutput("pf_pred_plot", fill = FALSE, height = facet_height_px(n_panels, 2, pf_multi_level_active()))
   })
 
   pf_interp_df <- reactive({
@@ -999,7 +1043,7 @@ server <- function(input, output, session) {
     })
 
     # x: the fixed source; xlab is one explicit string.
-    xlab_display <- paste0(unique(d$xlab)[1], if (is_pct_family) " (%)" else "")
+    xlab_display <- add_pct(unique(d$xlab)[1], is_pct_family)
 
     # y: the varying target; name the possible quantities and point to the per-facet unit tag.
     ylab_display <- if (input$pf_family == "Coral cover") {
@@ -1023,25 +1067,25 @@ server <- function(input, output, session) {
           "Each facet has its own independent x/y scale"
         }
       ) +
-      theme_csiro(13)
+      theme_csiro()
 
     if (is_pct_family) {
       p <- p + scale_x_continuous(labels = function(v) paste0(v, "%"))
     }
 
     p
-  })
+  }, res = 96)
 
   ## ---- Secondary plot: RS Surface/Deep source, Manta tow target, boxplot toggle on (descriptive) ----
   output$pf_secondary_plot_ui <- renderUI({
     if (!pf_secondary_applicable()) return(NULL)
     card(
-      full_screen = TRUE,
+      full_screen = TRUE, fill = FALSE,
       card_header(paste0(
         "Manta tow as one of the PREDICTED targets \u2014 empirical distribution of ",
         input$pf_from, " by Manta's coral-cover category"
       )),
-      plotOutput("pf_secondary_plot", height = "380px")
+      plotOutput("pf_secondary_plot", fill = FALSE, height = "380px")
     )
   })
 
@@ -1076,12 +1120,12 @@ server <- function(input, output, session) {
       ) +
       scale_x_continuous(labels = function(v) paste0(v, "%")) +
       scale_y_continuous(labels = function(v) paste0(v, "%")) +
-      theme_csiro(12)
+      theme_csiro()
 
     if (multi_level) p <- p + facet_wrap(~ level, ncol = 3)
 
-    p
-  })
+    wrap_subtitle(p, 95)
+  }, res = 96)
 
   ## ---- Table ----
   output$pf_pred_table <- renderTable({
@@ -1207,7 +1251,7 @@ server <- function(input, output, session) {
   })
 
   output$ft_plot_ui <- renderUI({
-    plotOutput("ft_pred_plot", height = if (ft_multi_level_active()) "620px" else "420px")
+    plotOutput("ft_pred_plot", fill = FALSE, height = if (ft_multi_level_active()) "620px" else "420px")
   })
 
   ft_interp_df <- reactive({
@@ -1316,8 +1360,8 @@ server <- function(input, output, session) {
     if (multi_level) p <- p + facet_wrap(~ level, ncol = 3, scales = "free_x")
 
     # One from/to pairing is shown, so xlab/ylab are single strings.
-    xlab_display <- paste0(unique(d$xlab)[1], if (is_pct) " (%)" else "")
-    ylab_display <- paste0(unique(d$ylab)[1], if (is_pct || is_prob) " (%)" else "")
+    xlab_display <- add_pct(unique(d$xlab)[1], is_pct)
+    ylab_display <- add_pct(unique(d$ylab)[1], is_pct || is_prob)
 
     p <- p +
       labs(
@@ -1330,7 +1374,7 @@ server <- function(input, output, session) {
           paste("Level:", input$ft_level)
         } else NULL
       ) +
-      theme_csiro(13)
+      theme_csiro()
 
     if (is_pct) {
       p <- p +
@@ -1341,18 +1385,18 @@ server <- function(input, output, session) {
     }
 
     p
-  })
+  }, res = 96)
 
   ## ---- Secondary plot: RS Surface/Deep source, Manta tow target, boxplot toggle on (descriptive) ----
   output$ft_secondary_plot_ui <- renderUI({
     if (!ft_secondary_applicable()) return(NULL)
     card(
-      full_screen = TRUE,
+      full_screen = TRUE, fill = FALSE,
       card_header(paste0(
         "Manta tow as the PREDICTED method \u2014 empirical distribution of ",
         input$ft_from, " by Manta's coral-cover category"
       )),
-      plotOutput("ft_secondary_plot", height = "380px")
+      plotOutput("ft_secondary_plot", fill = FALSE, height = "380px")
     )
   })
 
@@ -1386,12 +1430,12 @@ server <- function(input, output, session) {
       ) +
       scale_x_continuous(labels = function(v) paste0(v, "%")) +
       scale_y_continuous(labels = function(v) paste0(v, "%")) +
-      theme_csiro(12)
+      theme_csiro()
 
     if (multi_level) p <- p + facet_wrap(~ level, ncol = 3)
 
-    p
-  })
+    wrap_subtitle(p, 95)
+  }, res = 96)
 
   ## ---- Table ----
   output$ft_pred_table <- renderTable({
@@ -1505,20 +1549,20 @@ server <- function(input, output, session) {
 
   output$uc_plot_ui <- renderUI({
     if (uc_pooled_active()) {
-      return(plotOutput("uc_plot", height = "320px"))
+      return(plotOutput("uc_plot", fill = FALSE, height = "320px"))
     }
     if (uc_by_tool()) {
       h <- max(400, min(6000, 20 * nrow(uc_filtered()) + 140))
-      return(plotOutput("uc_plot", height = paste0(h, "px")))
+      return(plotOutput("uc_plot", fill = FALSE, height = paste0(h, "px")))
     }
     if (uc_band_active()) {
       n_band <- n_distinct(uc_filtered()$band_label)
       h <- max(300, min(2000, 28 * n_band))
-      return(plotOutput("uc_plot", height = paste0(h, "px")))
+      return(plotOutput("uc_plot", fill = FALSE, height = paste0(h, "px")))
     }
     n_reef <- n_distinct(uc_filtered()$reef_label)
     h <- max(400, min(4000, 28 * n_reef))
-    plotOutput("uc_plot", height = paste0(h, "px"))
+    plotOutput("uc_plot", fill = FALSE, height = paste0(h, "px"))
   })
 
   output$uc_plot <- renderPlot({
@@ -1532,7 +1576,7 @@ server <- function(input, output, session) {
 
       p <- ggplot(d, aes(y = method, x = mean, xmin = mean - sd, xmax = mean + sd, color = method)) +
         geom_pointrange(linewidth = 0.7, size = 0.55, show.legend = FALSE) +
-        geom_text(aes(label = paste0("n=", n)), hjust = -0.2, vjust = -1.1, size = 3.6, colour = "grey30") +
+        geom_text(aes(label = paste0("n=", n)), hjust = -0.2, vjust = -1.1, size = plot_base_size * 0.85 / ggplot2::.pt, colour = "grey30") +
         labs(
           y = "Method",
           x = if (log1p_mode) "COTS observed (count per tow or survey, log1p scale)" else unique(d$quantity)[1],
@@ -1543,7 +1587,7 @@ server <- function(input, output, session) {
           }
         ) +
         scale_colour_manual(values = method_cols) +
-        theme_csiro(13)
+        theme_csiro()
 
       if (log1p_mode) {
         p <- p + scale_x_continuous(breaks = log1p(cots_log1p_breaks), labels = cots_log1p_breaks)
@@ -1566,7 +1610,7 @@ server <- function(input, output, session) {
           }
         ) +
         scale_colour_manual(values = method_cols) +
-        theme_csiro(12)
+        theme_csiro()
 
       if (log1p_mode) {
         p <- p + scale_x_continuous(breaks = log1p(cots_log1p_breaks), labels = cots_log1p_breaks)
@@ -1589,7 +1633,7 @@ server <- function(input, output, session) {
         }
       ) +
       scale_colour_manual(values = method_cols) +
-      theme_csiro(12)
+      theme_csiro()
 
     if (log1p_mode) {
       p <- p + scale_x_continuous(breaks = log1p(cots_log1p_breaks), labels = cots_log1p_breaks)
@@ -1597,7 +1641,7 @@ server <- function(input, output, session) {
 
     if (uc_by_tool()) p <- uc_tool_layout(p)
     wrap_subtitle(p)
-  })
+  }, res = 96)
 
   ## ---- Table ----
   output$pred_table <- renderTable({
