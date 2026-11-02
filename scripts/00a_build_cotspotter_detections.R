@@ -18,10 +18,11 @@
 ##   data/derived/ingest/manta_tows.parquet      (tow geometry + reef labels)
 ##   data/raw/COTS Control Program Cull Sites - External/Cull_Sites_Master.shp
 ##
-## Reef resolution: `site_name` mostly matches the manta `reef_label`
-## directly. A few names need overriding (case differences, or a common name
-## used instead of a reef code); see `site_name_overrides` below. Detections
-## whose reef is not among the manta reefs are dropped with a warning.
+## Reef resolution: where `site_name` matches a manta `reef_label` (after the
+## `site_name_overrides` below) that label is used. Any other `site_name`
+## (a reef name, or "U/N Reef") is assigned the reef of the nearest manta tow
+## line, within `max_reef_dist_m`. Detections still unresolved (reef not among
+## the manta reefs) are dropped with a warning.
 ##
 ## Spatial assignment (same method for both platforms)
 ##   - Cull site: point-in-polygon (st_within) against Cull_Sites_Master.shp;
@@ -127,6 +128,8 @@ cull_sf <- st_read(
 
 manta_lines <- build_manta_lines(manta)
 
+max_reef_dist_m <- 1000  # spatial reef-assignment cutoff (m)
+
 site_name_overrides <- c(
   "21-250A" = "21-250a", "Lavers" = "21-235", "Mystery" = "21-258",
   "Shell" = "19-028", "Stanley" = "19-045", "Stucco" = "19-141"
@@ -139,7 +142,10 @@ cots_col_types <- cols(
   cots_video_sequence_length = col_double(), ML_model_confidence = col_double(),
   certified_by = col_character(), certified_at = col_character()
 )
-files <- list.files("data/raw/reefscan_cots/csv_files", full.names = TRUE, pattern = "\\.csv$")
+cotspotter_dir <- getOption("br04.cotspotter_dir", "data/raw/reefscan_cots/csv_files")
+files <- list.files(cotspotter_dir, full.names = TRUE, pattern = "\\.csv$")
+stopifnot(length(files) > 0)
+message("COTSpotter input folder: ", cotspotter_dir, " (", length(files), " files)")
 cots_raw <- map_dfr(files, read_csv, col_types = cots_col_types)
 
 # ---- Process one platform -> detection table + 3 count tables ----
@@ -156,6 +162,22 @@ process_cotspotter_platform <- function(cots_raw, platform, label,
       reef_label = coalesce(site_name_overrides[site_name], site_name),
       invalid_coordinates = latitude == 0 & longitude == 0
     )
+
+  # Spatial fallback for site names that are not a manta reef_label
+  need_sp <- which(!dat$reef_label %in% manta$reef_label & !dat$invalid_coordinates &
+                     !is.na(dat$latitude) & !is.na(dat$longitude))
+  if (length(need_sp) > 0) {
+    p <- dat[need_sp, ] |>
+      st_as_sf(coords = c("longitude", "latitude"), crs = 4326, remove = FALSE) |>
+      st_transform(3577)
+    j <- st_nearest_feature(p, manta_lines)
+    d <- as.numeric(st_distance(p, manta_lines[j, ], by_element = TRUE))
+    ok <- d <= max_reef_dist_m
+    dat$reef_label[need_sp[ok]] <- manta_lines$reef_label[j[ok]]
+    message(label, ": ", sum(ok), " detection(s) assigned to a reef spatially",
+            if (any(ok)) paste0(" (median ", round(median(d[ok])), " m, max ", round(max(d[ok])), " m)"),
+            "; ", sum(!ok), " beyond ", max_reef_dist_m, " m left unresolved")
+  }
 
   unresolved <- dat |> filter(!reef_label %in% manta$reef_label)
   if (nrow(unresolved) > 0) {
