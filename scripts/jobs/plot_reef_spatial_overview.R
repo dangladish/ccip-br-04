@@ -211,6 +211,7 @@ save_compact_jpeg(reef_spatial_overview, out_file, width = out_w, height = out_h
 # ---- GBR-wide reef locations by voyage ----
 ## Uses mt_allvoyages (all voyages). Each reef is placed at the mean of its tows'
 ## start/end coordinates.
+edna_reefs_8v <- readRDS("data/derived/edna_xwalk_8voyage.RDS")$reef_label
 reef_locations <- mt_allvoyages |>
   rename(reef_label = `Reef label`) |>
   group_by(reef_label, voyage, survey_folder) |>
@@ -219,8 +220,13 @@ reef_locations <- mt_allvoyages |>
     centroid_lon = mean(c(start_lon, end_lon), na.rm = TRUE),
     .groups = "drop"
   ) |>
-  # voyage_status drives the point shape in the plot (X = not used in calibration)
-  mutate(voyage_status = if_else(voyage %in% exclude_voyages, "Excluded from calibration", "Used in calibration"))
+  # voyage_status drives the point shape: circle = used, triangle = excluded voyage but used by the
+  # manta-eDNA models (manta from all voyages), X = not used
+  mutate(voyage_status = factor(case_when(
+    !voyage %in% exclude_voyages ~ "Used in calibration",
+    reef_label %in% edna_reefs_8v ~ "Used in manta-eDNA calibration only",
+    TRUE ~ "Excluded from calibration"),
+    levels = c("Used in calibration", "Used in manta-eDNA calibration only", "Excluded from calibration")))
 cat(nrow(reef_locations), "reefs across", n_distinct(reef_locations$voyage), "voyages in the GBR-wide overview\n")
 
 # Legend label "voyage (region, n reefs)"; region parsed from survey_folder,
@@ -251,7 +257,7 @@ reef_locations_overview <- ggplot() +
   # shape marks calibration use; colour marks voyage (an X has no fill)
   geom_sf(data = reef_locations_sf, aes(color = voyage_label, shape = voyage_status), size = 3, stroke = 1.3) +
   scale_color_brewer(name = "Voyage", palette = "Set1") +
-  scale_shape_manual(name = NULL, values = c("Used in calibration" = 16, "Excluded from calibration" = 4)) +
+  scale_shape_manual(name = NULL, values = c("Used in calibration" = 16, "Used in manta-eDNA calibration only" = 17, "Excluded from calibration" = 4)) +
   coord_sf(xlim = c(gbr_bb["xmin"], gbr_bb["xmax"]), ylim = c(gbr_bb["ymin"], gbr_bb["ymax"]), expand = FALSE) +
   annotation_scale(location = "bl", text_col = "white", line_col = "white") +
   annotation_north_arrow(location = "tr", which_north = "true", height = unit(1, "cm"), width = unit(1, "cm"),
