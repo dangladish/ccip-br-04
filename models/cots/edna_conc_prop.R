@@ -29,7 +29,8 @@ rm(fit_eDNAprop_from_eDNAconc_reef)
 fit_eDNAconc_from_eDNAprop_reef <- brm(
   bf(integer_conc_reef ~ log(edna_prop_reef + 0.01) + offset(log(n_assays_reef))),
   family = negbinomial(link = "log"), data = edna_reef, prior = d02_priors_eDNAconc_negbin_reef,
-  chains = 4, iter = 4000, warmup = 1000, seed = cots_seed, control = list(adapt_delta = 0.95, max_treedepth = 12)
+  # init = 0: random starts occasionally leave one chain stuck at an absurd shape
+  chains = 4, iter = 4000, warmup = 1000, seed = cots_seed, init = 0, control = list(adapt_delta = 0.95, max_treedepth = 12)
 )
 post_eDNAconc_from_eDNAprop_reef <- as.matrix(as_draws_matrix(fit_eDNAconc_from_eDNAprop_reef))
 colnames(post_eDNAconc_from_eDNAprop_reef)[colnames(post_eDNAconc_from_eDNAprop_reef) == "b_Intercept"] <- "alpha"

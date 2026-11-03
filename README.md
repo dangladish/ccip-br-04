@@ -18,7 +18,7 @@ scripts/
   01_coral_calibration.R              coral cover models (driver)
   02_cots_calibration.R               COTS models (driver)
   03_uncertainty_report.R             uncertainty comparison figures
-  04_edna_subreef_necklace.R          sub-reef eDNA necklace figures (24 reefs)
+  04_edna_subreef_necklace.R          sub-reef eDNA necklace figures (32 reefs)
   jobs/                               figure scripts and the Shiny data bundle
 R/                                    shared helpers
 models/coral/, models/cots/           one file per model pair and spatial level
@@ -77,7 +77,7 @@ Written to `output/figures/`. Figure numbers follow the final report.
 | 4-6 | `scripts/jobs/plot_report_figures.R` | `report_coral_manta_surface_all_levels.png`, `report_cots_crossmethod_cull_all_pairs.png`, `report_edna_reef_pairs.png` |
 | B1-B3 | `scripts/03_uncertainty_report.R` | `reef_*_all_reefs*.png` (three files) |
 | C1-C6 | `scripts/jobs/plot_cots_calibration_pages.R` | `cots_calibration_predicting_*.png` |
-| D1-D24 | `scripts/04_edna_subreef_necklace.R` | `edna_necklace/necklace_<reef>.png` |
+| D1-D32 | `scripts/04_edna_subreef_necklace.R` | `edna_necklace/necklace_<reef>.png` |
 
 ## Shiny app
 

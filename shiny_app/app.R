@@ -152,7 +152,7 @@ family_labels <- c(
 
 # Shared caveat wording (all three calibration tabs)
 msg_edna <- function(plural = TRUE) paste0(
-  "Only ~17\u201324 reefs have both measurements, so ",
+  "Only ~18\u201332 reefs have both measurements, so ",
   if (plural) "these curves are" else "this curve is",
   " indicative only."
 )
@@ -212,7 +212,8 @@ about_ui <- nav_panel(
           "Analyses use %d reefs from five voyages (FMPCRS 2025-02 to 2026-02); three of the eight",
           n_reefs_total),
           "voyages (2024-05, 2025-01, 2026-03) were excluded after a data-quality sensitivity analysis.",
-          "Models involving ReefScan Deep were the least stable under it."),
+          "Models involving ReefScan Deep were the least stable under it. The manta-versus-eDNA models are the exception:",
+          "they use manta tows from all eight voyages, because the exclusion concerns ReefScan data quality, not manta."),
         p(sprintf("Model outputs bundled on %s.", data_built))
       ),
       card(

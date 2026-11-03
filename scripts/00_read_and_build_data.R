@@ -13,7 +13,8 @@
 ## ReefScan points and COTSpotter counts (set in `exclude_voyages` below):
 ##   2024-05 and 2026-03 (precautionary); 2025-01 (RS Surface GPS freeze,
 ##   i.e. many consecutive images with identical coordinates).
-## eDNA and RHIS are not filtered by voyage.
+## eDNA and RHIS are not filtered by voyage. The manta-vs-eDNA models also use all 8
+## voyages (the exclusion concerns ReefScan quality, not manta); see reef_manta_8v below.
 ##
 ## Run from the repository root.
 
@@ -616,7 +617,7 @@ rs_deep_exclude <- in_excluded_window(as.Date(rs_deep_raw$`survey_start_date (UT
 n_surf_pre <- nrow(rs_surface_raw); n_deep_pre <- nrow(rs_deep_raw)
 rs_surface_raw <- rs_surface_raw[!rs_surf_exclude, ]
 rs_deep_raw    <- rs_deep_raw[!rs_deep_exclude, ]
-rm(rs_surf_voyage, rs_surf_exclude, rs_deep_exclude, in_excluded_window, mt_allvoyages, voyage_windows)
+rm(rs_surf_voyage, rs_surf_exclude, rs_deep_exclude, in_excluded_window, voyage_windows)
 
 cat("RS Surface points (post 3-voyage exclusion):", nrow(rs_surface_raw), "of", n_surf_pre,
     "-- excluded", n_surf_pre - nrow(rs_surface_raw),
@@ -796,15 +797,58 @@ rs_deep_xwalk <- rs_deep_raw |>
   select(rs_deep_site_reef_name = site_reef_name, reef_label)
 
 # --- eDNA: strip trailing " Reef"/plural "s", fall back to raw name match ---
-edna_step1 <- edna_reef_raw |>
-  distinct(Reef) |>
-  mutate(edna_candidate = str_remove(Reef, "\\s+Reef$") |> str_remove("s$") |> str_trim()) |>
-  left_join(mt_canon |> transmute(reef_label, reef_name_clean, join_key = reef_label), by = c("edna_candidate" = "join_key"))
+# Case-insensitive on the reef code (eDNA "21-250A" = manta "21-250a"). Built for the filtered manta
+# reefs (reef_xwalk) and for all 8 voyages (edna_xwalk_8v, used by the manta-vs-eDNA models).
+build_edna_xwalk <- function(canon) {
+  edna_reef_raw |>
+    distinct(Reef) |>
+    mutate(edna_candidate = str_remove(Reef, "\\s+Reef$") |> str_remove("s$") |> str_trim() |> str_to_lower()) |>
+    left_join(canon |> transmute(reef_label, join_key = str_to_lower(reef_label)), by = c("edna_candidate" = "join_key")) |>
+    left_join(canon |> transmute(reef_label2 = reef_label, join_key2 = reef_name_clean), by = c("Reef" = "join_key2")) |>
+    mutate(reef_label = coalesce(reef_label, reef_label2)) |>
+    select(edna_reef = Reef, reef_label)
+}
+edna_xwalk <- build_edna_xwalk(mt_canon)
 
-edna_xwalk <- edna_step1 |>
-  left_join(mt_canon |> transmute(reef_label2 = reef_label, join_key2 = reef_name_clean), by = c("Reef" = "join_key2")) |>
-  mutate(reef_label = coalesce(reef_label, reef_label2)) |>
-  select(edna_reef = Reef, reef_label)
+mt_canon_8v <- mt_allvoyages |>
+  distinct(reef_label, reef_name) |>
+  mutate(reef_name_clean = str_remove(reef_name, "\\s*\\([^)]+\\)\\s*$") |> str_trim())
+edna_xwalk_8v <- build_edna_xwalk(mt_canon_8v) |> filter(!is.na(reef_label))
+stopifnot(!anyDuplicated(edna_xwalk_8v$edna_reef), !anyDuplicated(edna_xwalk_8v$reef_label))
+
+# Manta reef-level aggregate over all 8 voyages (same definitions as manta_reef below).
+reef_manta_8v <- mt_allvoyages |>
+  filter(!is.na(reef_label)) |>
+  mutate(has_manta_tow = as.integer(scar_present == 1 | cots_observed > 0)) |>
+  group_by(reef_label) |>
+  summarise(
+    n_tows              = n(),
+    cots_observed       = sum(cots_observed, na.rm = TRUE),
+    feeding_scars       = sum(scar_present, na.rm = TRUE),
+    scar_count          = sum(scar_count, na.rm = TRUE),
+    n_scar_tows_imputed = sum(scar_count_imputed, na.rm = TRUE),
+    manta_combined      = sum(has_manta_tow, na.rm = TRUE),
+    n_voyages           = n_distinct(voyage),
+    .groups = "drop"
+  ) |>
+  mutate(
+    scar_rate           = feeding_scars / n_tows,
+    cots_rate           = cots_observed / n_tows,
+    manta_combined_rate = manta_combined / n_tows
+  )
+
+# Manta tows on the eDNA reefs, all voyages (input to 04_edna_subreef_necklace.R).
+tow_edna_8v <- mt_allvoyages |>
+  filter(reef_label %in% edna_xwalk_8v$reef_label) |>
+  transmute(
+    tow_id, voyage, tow_datetime, reef_label,
+    tow_mid_lon = (start_lon + end_lon) / 2, tow_mid_lat = (start_lat + end_lat) / 2,
+    cots_observed, scar_count
+  )
+saveRDS(tow_edna_8v, "data/derived/tow_edna_8voyage.RDS")
+saveRDS(edna_xwalk_8v, "data/derived/edna_xwalk_8voyage.RDS")
+saveRDS(reef_manta_8v, "data/derived/reef_manta_8voyage.RDS")
+rm(mt_canon_8v, mt_allvoyages, build_edna_xwalk)
 
 reef_xwalk <- mt_canon |>
   select(reef_label, reef_name_clean) |>
@@ -831,7 +875,7 @@ reef_xwalk <- mt_canon |>
 # reef_label mapping (used with the 280 m eDNA-site-assignment cutoff).
 saveRDS(rs_surf_xwalk |> filter(!is.na(reef_label)), "data/derived/rs_surf_site_xwalk.RDS")
 
-rm(mt_canon, rs_surf_xwalk, rs_deep_xwalk, edna_step1, edna_xwalk, strip_reef_suffix)
+rm(mt_canon, rs_surf_xwalk, rs_deep_xwalk, edna_xwalk, strip_reef_suffix)
 cat("Reef crosswalk:", nrow(reef_xwalk), "reefs -- has_rs_surf:", sum(reef_xwalk$has_rs_surf),
     " has_rs_deep:", sum(reef_xwalk$has_rs_deep), " has_edna:", sum(reef_xwalk$has_edna),
     " has_rhis:", sum(reef_xwalk$has_rhis), "\n")

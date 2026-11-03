@@ -7,7 +7,7 @@
 ## maps eDNA concentration, eDNA proportion positive, manta density and
 ## ReefScan Surface density bead by bead over satellite imagery.
 ##
-## Inputs:  data/derived/{tow_level,edna_raw,reef_xwalk}.RDS (Esri World
+## Inputs:  data/derived/{tow_level,tow_edna_8voyage,edna_xwalk_8voyage,edna_raw}.RDS (Esri World
 ##          Imagery tiles are downloaded on first run, then cached).
 ## Outputs: output/figures/edna_necklace/necklace_<reef>.png
 ##          data/derived/edna_subreef_beads.RDS (bead table, no geometry)
@@ -34,7 +34,10 @@ library(magick)
 ## ---- Inputs ----
 tow_level  <- readRDS("data/derived/tow_level.RDS")
 edna_raw   <- readRDS("data/derived/edna_raw.RDS")
-reef_xwalk <- readRDS("data/derived/reef_xwalk.RDS")
+edna_xwalk <- readRDS("data/derived/edna_xwalk_8voyage.RDS")
+## Manta tows on the eDNA reefs from all 8 voyages; RS Surface counts are NA for tows in excluded voyages.
+tow_edna <- readRDS("data/derived/tow_edna_8voyage.RDS") |>
+  left_join(tow_level |> select(tow_id, cots_reefscan_surface), by = "tow_id")
 
 fig_dir   <- "output/figures/edna_necklace"
 tile_dir  <- "data/derived/_tile_cache"
@@ -44,7 +47,7 @@ dir.create(tile_dir, showWarnings = FALSE, recursive = TRUE)
 ## Map eDNA reef codes to manta reef_label
 edna_mapped <- edna_raw |>
   inner_join(
-    reef_xwalk |> filter(!is.na(edna_reef)) |> select(edna_reef, reef_label),
+    edna_xwalk,
     by = "edna_reef"
   )
 
@@ -362,7 +365,7 @@ make_necklace_reef <- function(reef_lbl, target_area_m2 = 100000, zoom = 15) {
   if (nrow(site_pts) < 2 || anyNA(site_pts$lat))
     return(list(ok = FALSE, reason = "insufficient eDNA sites"))
 
-  tow_r <- tow_level |>
+  tow_r <- tow_edna |>
     filter(reef_label == reef_lbl, !is.na(tow_mid_lon), !is.na(tow_mid_lat))
   if (nrow(tow_r) < 3)
     return(list(ok = FALSE, reason = "insufficient manta tows"))
@@ -485,7 +488,7 @@ make_necklace_reef <- function(reef_lbl, target_area_m2 = 100000, zoom = 15) {
 }
 
 ## ---- Run all reefs with eDNA and manta tows ----
-reefs <- sort(intersect(unique(edna_mapped$reef_label), unique(tow_level$reef_label)))
+reefs <- sort(intersect(unique(edna_mapped$reef_label), unique(tow_edna$reef_label)))
 
 # Each figure is saved as soon as it is built and the plot dropped, to limit memory use.
 results <- map(set_names(reefs), \(rl) {

@@ -54,7 +54,7 @@ for (f in edna_model_files) {
 }
 
 # Free the eDNA tables before building the larger cross-method ones.
-rm(edna_reef, reef_manta, reef_surf, mt, edna_raw, reef_xwalk, xwalk, manta_cots_per_ha_factor)
+rm(edna_reef, reef_manta, reef_surf, mt, edna_raw, reef_xwalk, xwalk, xwalk_8v, reef_manta_8v, manta_cots_per_ha_factor)
 
 # ---- Cross-method models (manta <-> RS Surface <-> RS Deep) ----
 

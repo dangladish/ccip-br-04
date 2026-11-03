@@ -2,7 +2,8 @@
 # Data prep for the eDNA calibration models (reef level only; eDNA samples are not tied to
 # tows, so all samples are pooled to the reef). Sourced WITHOUT local = TRUE: it builds the
 # tables edna_reef, reef_manta and reef_surf that the eDNA model files read.
-# Inputs (from the driver): edna_raw, xwalk (eDNA reef -> reef_label), reef_level.
+# Inputs (from the driver): edna_raw, reef_level. The manta side reads data/derived/reef_manta_8voyage.RDS and
+# edna_xwalk_8voyage.RDS (manta tows from all 8 voyages; RS Surface stays on the filtered reef_level).
 #
 # Response definitions (pooled over all samples in a reef):
 # - Binary: n_success / n_trials = LOD-positive samples / samples with a non-NA LOD call.
@@ -12,12 +13,15 @@
 #   a NegBin with offset log(n_assays_reef). edna_conc_rate_reef = integer_conc_reef /
 #   n_assays_reef is kept as a rate for use as a predictor.
 
+xwalk_8v      <- readRDS("data/derived/edna_xwalk_8voyage.RDS")
+reef_manta_8v <- readRDS("data/derived/reef_manta_8voyage.RDS")
+
 edna_reef <- edna_raw |>
   mutate(
     n_valid_conc = (!is.na(pcr1_conc)) + (!is.na(pcr2_conc)),
     conc_row     = coalesce(pcr1_conc, 0) + coalesce(pcr2_conc, 0)
   ) |>
-  left_join(xwalk, by = "edna_reef") |>
+  left_join(xwalk_8v, by = "edna_reef") |>
   filter(!is.na(reef_label)) |>
   group_by(reef_label) |>
   summarise(
@@ -43,7 +47,7 @@ manta_cots_per_ha_factor <- 68
 
 reef_manta <- edna_reef |>
   inner_join(
-    reef_level |> select(reef_label, cots_observed, feeding_scars, scar_count, n_tows, scar_rate, cots_rate,
+    reef_manta_8v |> select(reef_label, cots_observed, feeding_scars, scar_count, n_tows, scar_rate, cots_rate,
                          manta_combined, manta_combined_rate),
     by = "reef_label"
   ) |>

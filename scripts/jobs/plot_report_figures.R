@@ -225,7 +225,8 @@ edna_panel_i <- edna_panel_i + 1
 fit_manta_from_eDNAconc_combined_reef <- brm(
   bf(manta_combined ~ log(edna_conc_rate_reef + 0.01) + offset(log(n_tows))),
   family = negbinomial(link = "log"), data = reef_manta, prior = d02_priors_eDNAconc_negbin_reef,
-  chains = 4, iter = 4000, warmup = 1000, seed = cots_seed, control = list(adapt_delta = 0.95, max_treedepth = 12)
+  # adapt_delta 0.99: at 0.95 one chain can get stuck at an absurd shape
+  chains = 4, iter = 4000, warmup = 1000, seed = cots_seed, control = list(adapt_delta = 0.99, max_treedepth = 12)
 )
 cat("manta_from_eDNAconc_combined_reef: max Rhat =", max(brms::rhat(fit_manta_from_eDNAconc_combined_reef)), "\n")
 post_manta_from_eDNAconc_combined_reef <- as.matrix(as_draws_matrix(fit_manta_from_eDNAconc_combined_reef))
