@@ -47,7 +47,7 @@ data_built    <- format(as.Date(app_data$built_at), "%d %B %Y")
 app_meta <- list(
   title    = "Rosetta-GBR",
   subtitle = "Method Calibration Explorer (CCIP-BR-04)",
-  version  = "1.0",
+  version  = "1.1",
   year     = "2026",
   contact_name = "Dan Gladish",
   contact  = "dan.gladish@csiro.au",
