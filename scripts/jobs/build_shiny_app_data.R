@@ -105,24 +105,37 @@ coral_pairs <- list(
 )
 lvl_ui <- c(tow = "Tow", cull = "Cull-site", reef = "Reef")
 
+# Observed-range curve plus extra points over 0-1 flagged `extrapolated`. The extension
+# uses its own seed and restores the RNG state, so other curves are unaffected.
+coral_curve_ext <- function(post, x_obs, n_ext = 60) {
+  x_lo <- min(x_obs); x_hi <- max(x_obs)
+  main <- predict_beta_curve(post, seq(x_lo, x_hi, length.out = 100)) |>
+    mutate(extrapolated = FALSE)
+  rng_state <- .Random.seed
+  on.exit(assign(".Random.seed", rng_state, envir = globalenv()))
+  set.seed(7261)
+  x_ext <- c(if (x_lo > 0) head(seq(0, x_lo, length.out = n_ext + 1), -1),
+             if (x_hi < 1) tail(seq(x_hi, 1, length.out = n_ext + 1), -1))
+  ext <- predict_beta_curve(post, x_ext) |> mutate(extrapolated = TRUE)
+  bind_rows(ext, main) |> arrange(x)
+}
+
 for (p in coral_pairs) {
   for (lvl in c("tow", "cull", "reef")) {
     d <- p[[lvl]]
     xA <- d[[p$colA]]; xB <- d[[p$colB]]
 
     post_AfromB <- load_post(p$lab_from_B[[lvl]])
-    x_seq <- seq(min(xB), max(xB), length.out = 100)
     add_result(curve_row(
       c("Coral cover", lvl_ui[[lvl]], p$B, p$A), xB, xA,
-      predict_beta_curve(post_AfromB, x_seq), length(xA), post_AfromB[, "beta"],
+      coral_curve_ext(post_AfromB, xB), length(xA), post_AfromB[, "beta"],
       xlab = paste(p$B, "hard coral cover (%)"), ylab = paste(p$A, "hard coral cover (%)"), pct_axes = TRUE
     ))
 
     post_BfromA <- load_post(p$lab_from_A[[lvl]])
-    x_seq <- seq(min(xA), max(xA), length.out = 100)
     add_result(curve_row(
       c("Coral cover", lvl_ui[[lvl]], p$A, p$B), xA, xB,
-      predict_beta_curve(post_BfromA, x_seq), length(xB), post_BfromA[, "beta"],
+      coral_curve_ext(post_BfromA, xA), length(xB), post_BfromA[, "beta"],
       xlab = paste(p$A, "hard coral cover (%)"), ylab = paste(p$B, "hard coral cover (%)"), pct_axes = TRUE
     ))
   }
@@ -368,7 +381,7 @@ x_seq <- seq(0, max(reef_surf_eff$edna_prop_reef, na.rm = TRUE), length.out = 10
 add_result(curve_row(c("eDNA", NA_character_, "eDNA proportion", "ReefScan Surface"), reef_surf_eff$edna_prop_reef, reef_surf_eff$cots_reefscan_surface / reef_surf_eff$effort_surf,
   predict_negbin_curve_density(post, x_seq, surf_eff_rep2, eps = 0.01), nrow(reef_surf_eff), post[, "beta"],
   xlab = "eDNA proportion positive", ylab = "RS Surface COTS density (per tow)"))
-pred_curves  <- bind_rows(pred_list)
+pred_curves  <- bind_rows(pred_list) |> mutate(extrapolated = coalesce(extrapolated, FALSE))
 observations <- bind_rows(obs_list)
 
 cat("\npred_curves:", nrow(pred_curves), "rows across", n_distinct(pred_curves$id), "model directions (expected 52 = 18 coral + 24 COTS cross-method + 10 eDNA)\n")

@@ -35,7 +35,8 @@ clean_label <- function(x) {
 pred_curves  <- pred_curves  |>
   mutate(across(c(from, to, xlab, ylab), clean_label),
          # COTS rows are NA here; treated as not a percent-scale axis.
-         pct_axes = coalesce(pct_axes, FALSE))
+         pct_axes = coalesce(pct_axes, FALSE),
+         extrapolated = coalesce(extrapolated, FALSE))
 observations <- observations |> mutate(across(c(from, to), clean_label))
 
 n_reefs_total <- n_distinct(uncertainty_comparison$reef_label)
@@ -63,6 +64,7 @@ csiro <- list(
 col_curve <- csiro$midnight
 col_band  <- csiro$midday
 col_pt    <- "#B2182B"
+col_extrap <- "#D95F02"   # uncertainty band beyond the observed data range
 method_cols <- c(
   "Manta tow"        = csiro$midnight,
   "ReefScan Surface" = csiro$midday,
@@ -162,9 +164,69 @@ msg_prob <- paste(
   "0\u2013100%; the credible interval is more informative."
 )
 msg_pi_missing <- "No prediction interval for some curves; the credible interval is shown for those."
+msg_extrap <- paste(
+  "Orange bands (dashed mean) are extrapolated beyond the range of source values the model was fitted on:",
+  "they rest on the assumed curve shape alone, so treat them with caution."
+)
+
+# Is the value xout outside the observed range of this curve (tolerance: slider rounding)?
+outside_observed <- function(xout, dd) {
+  xr <- dd$x[!dd$extrapolated]
+  tol <- 1e-3 * diff(range(dd$x))
+  length(xr) > 0 && (xout < min(xr) - tol || xout > max(xr) + tol)
+}
+
+# Split a curve table into its observed part and the extrapolated parts (each including the
+# adjacent observed point so segments join without a gap)
+extrap_parts <- function(d2) {
+  d2 <- d2 |>
+    group_by(id) |>
+    mutate(obs_lo = min(x[!extrapolated]), obs_hi = max(x[!extrapolated])) |>
+    ungroup()
+  ext <- bind_rows(
+    d2 |> filter(x <= obs_lo) |> mutate(grp = paste(id, "lo")),
+    d2 |> filter(x >= obs_hi) |> mutate(grp = paste(id, "hi"))
+  ) |>
+    group_by(grp) |> filter(n() > 1) |> ungroup()
+  if (!any(d2$extrapolated)) ext <- ext[0, ]
+  list(main = filter(d2, !extrapolated), ext = ext)
+}
+
+# Uncertainty ribbon: blue where observed, orange (with a caption) where extrapolated
+ribbon_layers <- function(d2) {
+  parts <- extrap_parts(d2)
+  layers <- list(geom_ribbon(
+    data = parts$main,
+    aes(x = x, ymin = band_lo, ymax = band_hi, group = id), fill = col_band, alpha = 0.25
+  ))
+  if (nrow(parts$ext) > 0) {
+    layers <- c(layers, list(
+      geom_ribbon(data = parts$ext, aes(x = x, ymin = band_lo, ymax = band_hi, group = grp),
+                  fill = col_extrap, alpha = 0.35),
+      labs(caption = "Orange band and dashed line = extrapolated beyond the observed range of the source data")
+    ))
+  }
+  layers
+}
+
+# Mean curve: solid where observed, dashed where extrapolated
+mean_line_layers <- function(d2) {
+  parts <- extrap_parts(d2)
+  layers <- list(geom_line(data = parts$main, aes(x = x, y = mean, group = id),
+                           colour = col_curve, linewidth = 1))
+  if (nrow(parts$ext) > 0) {
+    layers <- c(layers, list(geom_line(data = parts$ext, aes(x = x, y = mean, group = grp),
+                                       colour = col_curve, linewidth = 1, linetype = "dashed")))
+  }
+  layers
+}
 
 # Optional detail lives in tooltips on the controls, not in the caveat box.
 tip_box <- "Boxplots (with raw points) of observations grouped by Manta tow's 11 ordinal coral-cover categories."
+tip_extrap <- paste(
+  "Extend each curve over the full 0\u2013100% source cover. Beyond the range of the data used to fit the model",
+  "the curve rests on the assumed shape alone; those parts are drawn in orange."
+)
 tip_se  <- paste(
   "Analytic standard error of each cull-site/reef observation (not the model's interval).",
   "COTS errors are Poisson-based, so they are lower bounds."
@@ -290,6 +352,14 @@ ui <- page_navbar(
           )
         ),
 
+        conditionalPanel(
+          condition = "input.family == 'Coral cover'",
+          tooltip(
+            input_switch("extrapolate", "Extrapolate beyond observed range (0\u2013100%)", value = FALSE),
+            tip_extrap
+          )
+        ),
+
         uiOutput("slider_ui"),
 
         radioButtons(
@@ -350,6 +420,14 @@ ui <- page_navbar(
           tooltip(
             input_switch("pf_box_manta", "Show Manta tow coral-category boxplots", value = FALSE),
             tip_box
+          )
+        ),
+
+        conditionalPanel(
+          condition = "input.pf_family == 'Coral cover'",
+          tooltip(
+            input_switch("pf_extrapolate", "Extrapolate beyond observed range (0\u2013100%)", value = FALSE),
+            tip_extrap
           )
         ),
 
@@ -416,6 +494,14 @@ ui <- page_navbar(
           tooltip(
             input_switch("ft_box_manta", "Show Manta tow coral-category boxplots", value = FALSE),
             tip_box
+          )
+        ),
+
+        conditionalPanel(
+          condition = "input.ft_family == 'Coral cover'",
+          tooltip(
+            input_switch("ft_extrapolate", "Extrapolate beyond observed range (0\u2013100%)", value = FALSE),
+            tip_extrap
           )
         ),
 
@@ -554,7 +640,8 @@ server <- function(input, output, session) {
       d <- d |> filter(level == input$level)
     }
     choices <- d |> pull(to) |> unique() |> sort()
-    selectInput("to", "Predict to:", choices = choices)
+    selectInput("to", "Predict to:", choices = choices,
+                selected = if ("ReefScan Surface" %in% choices) "ReefScan Surface")
   })
 
   ## ---- Curves/observations for the current selection (all levels kept when "show all levels" is on) ----
@@ -565,6 +652,7 @@ server <- function(input, output, session) {
       req(input$level)
       d <- d |> filter(level == input$level)
     }
+    if (!isTRUE(input$extrapolate)) d <- d |> filter(!extrapolated)
     d
   })
 
@@ -620,6 +708,7 @@ server <- function(input, output, session) {
         pred = approx(dd$x, dd$mean, xout = input$obs_value, rule = 2)$y,
         lo   = approx(dd$x, lo_col,  xout = input$obs_value, rule = 2)$y,
         hi   = approx(dd$x, hi_col,  xout = input$obs_value, rule = 2)$y,
+        extrapolated = outside_observed(input$obs_value, dd),
         pi_available = pi_avail,
         used_interval = if (use_pi && pi_avail) "Prediction" else "Credible"
       )
@@ -685,7 +774,7 @@ server <- function(input, output, session) {
       }
     }
 
-    p <- p + geom_ribbon(aes(ymin = band_lo, ymax = band_hi), fill = col_band, alpha = 0.25)
+    p <- p + ribbon_layers(d2)
 
     o_manta_box <- box_on && any(o$from == "Manta tow")
     o_rest      <- if (o_manta_box) o2 |> filter(from != "Manta tow") else o2
@@ -717,7 +806,7 @@ server <- function(input, output, session) {
     }
 
     p <- p +
-      geom_line(aes(y = mean), colour = col_curve, linewidth = 1) +
+      mean_line_layers(d2) +
       geom_vline(xintercept = unique(interp$x), linetype = "dashed", colour = "grey40") +
       geom_point(data = interp, aes(x = x, y = pred), size = 3, colour = col_pt) +
       geom_errorbar(data = interp, aes(x = x, ymin = lo, ymax = hi), width = 0, colour = col_pt)
@@ -867,6 +956,7 @@ server <- function(input, output, session) {
       req(input$pf_level)
       d <- d |> filter(level == input$pf_level)
     }
+    if (!isTRUE(input$pf_extrapolate)) d <- d |> filter(!extrapolated)
     d
   })
 
@@ -924,6 +1014,7 @@ server <- function(input, output, session) {
         pred = approx(dd$x, dd$mean, xout = input$pf_obs_value, rule = 2)$y,
         lo   = approx(dd$x, lo_col,  xout = input$pf_obs_value, rule = 2)$y,
         hi   = approx(dd$x, hi_col,  xout = input$pf_obs_value, rule = 2)$y,
+        extrapolated = outside_observed(input$pf_obs_value, dd),
         pi_available = pi_avail,
         used_interval = if (use_pi && pi_avail) "Prediction" else "Credible"
       )
@@ -984,6 +1075,14 @@ server <- function(input, output, session) {
       )
     if (multi_level) interp <- interp |> mutate(level = factor(level, levels = level_choices))
 
+    # Panel order: ReefScan Surface target first, the rest alphabetical
+    lab_levels <- sort(unique(d2$facet_lab))
+    lab_levels <- c(grep("^ReefScan Surface", lab_levels, value = TRUE),
+                    grep("^ReefScan Surface", lab_levels, value = TRUE, invert = TRUE))
+    d2     <- d2     |> mutate(facet_lab = factor(facet_lab, levels = lab_levels))
+    o2     <- o2     |> mutate(facet_lab = factor(facet_lab, levels = lab_levels))
+    interp <- interp |> mutate(facet_lab = factor(facet_lab, levels = lab_levels))
+
     has_pi_any <- any(!is.na(d2$pi_lo95))
     use_pi     <- isTRUE(input$pf_interval_type == "pi") && has_pi_any
     d2 <- d2 |> mutate(band_lo = if (use_pi) pi_lo95 else lo95, band_hi = if (use_pi) pi_hi95 else hi95)
@@ -1004,14 +1103,15 @@ server <- function(input, output, session) {
       }
     }
 
-    p <- p + geom_ribbon(aes(ymin = band_lo, ymax = band_hi), fill = col_band, alpha = 0.25)
+    p <- p + ribbon_layers(d2)
 
     if (box_on) {
       o_box <- o |>
         mutate(cat_mid = bin_to_category_mid(x) * mult_x, y = y * 100) |>
         filter(!is.na(cat_mid)) |>
         left_join(flag_lookup, by = intersect(c("level", "to"), names(o))) |>
-        mutate(facet_lab = paste0(to, pf_unit_tag(is_probability, is_pct_family)))
+        mutate(facet_lab = factor(paste0(to, pf_unit_tag(is_probability, is_pct_family)),
+                                  levels = lab_levels))
       if (multi_level) o_box <- o_box |> mutate(level = factor(level, levels = level_choices))
       p <- p +
         geom_boxplot(
@@ -1032,7 +1132,7 @@ server <- function(input, output, session) {
     }
 
     p <- p +
-      geom_line(aes(y = mean), colour = col_curve, linewidth = 1) +
+      mean_line_layers(d2) +
       geom_vline(xintercept = input$pf_obs_value * mult_x, linetype = "dashed", colour = "grey40") +
       geom_point(data = interp, aes(x = x, y = pred), size = 3, colour = col_pt) +
       geom_errorbar(data = interp, aes(x = x, ymin = lo, ymax = hi), width = 0, colour = col_pt)
@@ -1138,17 +1238,20 @@ server <- function(input, output, session) {
         `Lower`              = if_else(is_probability, paste0(signif(lo * 100, 3), "%"), as.character(signif(lo, 3))),
         `Upper`              = if_else(is_probability, paste0(signif(hi * 100, 3), "%"), as.character(signif(hi, 3))),
         `Interval shown`     = used_interval,
+        `Range`              = if_else(extrapolated, "Extrapolated", "Within observed range"),
         `n (model fit)`      = n,
         `Slope (beta, model scale)` = paste0(
           signif(beta_mean, 2), " [", signif(beta_lo95, 2), ", ", signif(beta_hi95, 2), "]"
         )
-      )
+      ) |>
+      select(-any_of(if (isTRUE(input$pf_extrapolate) && isTRUE(input$pf_family == "Coral cover")) character(0) else "Range"))
   }, striped = TRUE, bordered = TRUE)
 
   ## ---- Caveats (Predicting from tab) ----
   output$pf_caveat <- renderText({
     msgs <- character(0)
     d_cur <- tryCatch(pf_current_curves(), error = function(e) NULL)
+    if (isTRUE(input$pf_extrapolate) && isTRUE(input$pf_family == "Coral cover")) msgs <- c(msgs, msg_extrap)
 
     if (isTRUE(input$pf_family == "eDNA")) {
       msgs <- c(msgs, msg_edna(TRUE))
@@ -1211,7 +1314,8 @@ server <- function(input, output, session) {
       d <- d |> filter(level == input$ft_level)
     }
     choices <- d |> pull(to) |> unique() |> sort()
-    selectInput("ft_to", "Target method (to):", choices = choices)
+    selectInput("ft_to", "Target method (to):", choices = choices,
+                selected = if ("ReefScan Surface" %in% choices) "ReefScan Surface")
   })
 
   ft_current_curves <- reactive({
@@ -1221,6 +1325,7 @@ server <- function(input, output, session) {
       req(input$ft_level)
       d <- d |> filter(level == input$ft_level)
     }
+    if (!isTRUE(input$ft_extrapolate)) d <- d |> filter(!extrapolated)
     d
   })
 
@@ -1275,6 +1380,7 @@ server <- function(input, output, session) {
         pred = approx(dd$x, dd$mean, xout = input$ft_obs_value, rule = 2)$y,
         lo   = approx(dd$x, lo_col,  xout = input$ft_obs_value, rule = 2)$y,
         hi   = approx(dd$x, hi_col,  xout = input$ft_obs_value, rule = 2)$y,
+        extrapolated = outside_observed(input$ft_obs_value, dd),
         pi_available = pi_avail,
         used_interval = if (use_pi && pi_avail) "Prediction" else "Credible"
       )
@@ -1327,7 +1433,7 @@ server <- function(input, output, session) {
       }
     }
 
-    p <- p + geom_ribbon(aes(ymin = band_lo, ymax = band_hi), fill = col_band, alpha = 0.25)
+    p <- p + ribbon_layers(d2)
 
     if (box_on) {
       o_box <- o |>
@@ -1353,7 +1459,7 @@ server <- function(input, output, session) {
     }
 
     p <- p +
-      geom_line(aes(y = mean), colour = col_curve, linewidth = 1) +
+      mean_line_layers(d2) +
       geom_vline(xintercept = unique(interp$x), linetype = "dashed", colour = "grey40") +
       geom_point(data = interp, aes(x = x, y = pred), size = 3, colour = col_pt) +
       geom_errorbar(data = interp, aes(x = x, ymin = lo, ymax = hi), width = 0, colour = col_pt)
@@ -1447,17 +1553,20 @@ server <- function(input, output, session) {
         `Lower`              = if_else(is_probability, paste0(signif(lo * 100, 3), "%"), as.character(signif(lo, 3))),
         `Upper`              = if_else(is_probability, paste0(signif(hi * 100, 3), "%"), as.character(signif(hi, 3))),
         `Interval shown`     = used_interval,
+        `Range`              = if_else(extrapolated, "Extrapolated", "Within observed range"),
         `n (model fit)`      = n,
         `Slope (beta, model scale)` = paste0(
           signif(beta_mean, 2), " [", signif(beta_lo95, 2), ", ", signif(beta_hi95, 2), "]"
         )
-      )
+      ) |>
+      select(-any_of(if (isTRUE(input$ft_extrapolate) && isTRUE(input$ft_family == "Coral cover")) character(0) else "Range"))
   }, striped = TRUE, bordered = TRUE)
 
   ## ---- Caveats (Predicting from and to tab) ----
   output$ft_caveat <- renderText({
     msgs <- character(0)
     d_cur <- tryCatch(ft_current_curves(), error = function(e) NULL)
+    if (isTRUE(input$ft_extrapolate) && isTRUE(input$ft_family == "Coral cover")) msgs <- c(msgs, msg_extrap)
 
     if (isTRUE(input$ft_family == "eDNA")) {
       msgs <- c(msgs, msg_edna(FALSE))
@@ -1654,17 +1763,20 @@ server <- function(input, output, session) {
         `Lower`              = if_else(is_probability, paste0(signif(lo * 100, 3), "%"), as.character(signif(lo, 3))),
         `Upper`              = if_else(is_probability, paste0(signif(hi * 100, 3), "%"), as.character(signif(hi, 3))),
         `Interval shown`     = used_interval,
+        `Range`              = if_else(extrapolated, "Extrapolated", "Within observed range"),
         `n (model fit)`      = n,
         `Slope (beta, model scale)` = paste0(
           signif(beta_mean, 2), " [", signif(beta_lo95, 2), ", ", signif(beta_hi95, 2), "]"
         )
-      )
+      ) |>
+      select(-any_of(if (isTRUE(input$extrapolate) && isTRUE(input$family == "Coral cover")) character(0) else "Range"))
   }, striped = TRUE, bordered = TRUE)
 
   ## ---- Caveats (Calibration curves tab) ----
   output$caveat <- renderText({
     msgs <- character(0)
     d_cur <- tryCatch(current_curves(), error = function(e) NULL)
+    if (isTRUE(input$extrapolate) && isTRUE(input$family == "Coral cover")) msgs <- c(msgs, msg_extrap)
 
     if (isTRUE(input$family == "eDNA")) {
       msgs <- c(msgs, msg_edna(TRUE))
