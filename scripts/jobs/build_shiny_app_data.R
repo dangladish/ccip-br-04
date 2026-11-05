@@ -489,9 +489,9 @@ cat("uncertainty_band_comparison:", nrow(uncertainty_band_comparison), "rows,",
 # ---- Save bundle ----
 
 coral_midpoints <- c("0" = 0, "1-" = 0.025, "1+" = 0.075, "2-" = 0.15, "2+" = 0.25,
-                      "3-" = 0.35, "3+" = 0.45, "4-" = 0.55, "4+" = 0.65,
-                      "5-" = 0.75, "5+" = 0.875)
-coral_cat_breaks <- c(-Inf, 0, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, Inf)
+                      "3-" = 0.35, "3+" = 0.45, "4-" = 0.5625, "4+" = 0.6875,
+                      "5-" = 0.8125, "5+" = 0.9375)
+coral_cat_breaks <- c(-Inf, 0, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.625, 0.75, 0.875, Inf)
 stopifnot(length(coral_cat_breaks) == length(coral_midpoints) + 1)
 
 app_data <- list(

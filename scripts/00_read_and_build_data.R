@@ -27,15 +27,15 @@ library(xml2)
 
 dir.create("data/derived", showWarnings = FALSE, recursive = TRUE)
 
-# ---- Coral-cover midpoint scale (manta ordinal categories -> proportions) ----
+# ---- Coral-cover midpoint scale (manta ordinal categories -> proportions; midpoints of the category ranges) ----
 {
 coral_midpoints <- c(
   "0"  = 0.000,
   "1-" = 0.025, "1+" = 0.075,
   "2-" = 0.150, "2+" = 0.250,
   "3-" = 0.350, "3+" = 0.450,
-  "4-" = 0.550, "4+" = 0.650,
-  "5-" = 0.750, "5+" = 0.875
+  "4-" = 0.5625, "4+" = 0.6875,
+  "5-" = 0.8125, "5+" = 0.9375
 )
 coral_levels <- names(coral_midpoints)
 }
