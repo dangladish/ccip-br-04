@@ -97,7 +97,7 @@ The raw data and fitted posteriors are not stored in this repository
 published as a zip file whose contents unpack to `data/raw/`: unzip it into the
 repository root and the pipeline above runs as written.
 
-**Data location: TBD.** *(To be added once the data are archived.)*
+**Data location: CSIRO Data Access Portal (https://data.csiro.au/collection/csiro:78978).** 
 
 ## Licence and citation
 
